@@ -66,10 +66,8 @@ void InstancedBuffer::merge(scene::SubModel *subModel, uint32_t passIdx, gfx::Sh
     auto *lightingMap = descriptorSet->getTexture(LIGHTMAPTEXTURE::BINDING);
     auto *reflectionProbeCubemap = descriptorSet->getTexture(REFLECTIONPROBECUBEMAP::BINDING);
     auto *reflectionProbePlanarMap = descriptorSet->getTexture(REFLECTIONPROBEPLANARMAP::BINDING);
-    gfx::Texture *reflectionProbeBlendCubemap = ENABLE_PROBE_BLEND
-        ? descriptorSet->getTexture(REFLECTIONPROBEBLENDCUBEMAP::BINDING)
-        : nullptr;
-    const uint32_t reflectionProbeType = subModel->getReflectionProbeType();
+    auto *reflectionProbeBlendCubemap = descriptorSet->getTexture(REFLECTIONPROBEBLENDCUBEMAP::BINDING);
+    uint32_t reflectionProbeType = subModel->getReflectionProbeType();
     auto *shader = shaderImplant;
     if (!shader) {
         shader = subModel->getShader(passIdx);
@@ -104,7 +102,6 @@ void InstancedBuffer::merge(scene::SubModel *subModel, uint32_t passIdx, gfx::Sh
         if (instance.drawInfo.instanceCount >= instance.capacity) { // resize buffers
             instance.capacity <<= 1;
             const auto newSize = instance.stride * instance.capacity;
-            // NOLINTNEXTLINE(bugprone-suspicious-realloc-usage)
             instance.data = static_cast<uint8_t *>(CC_REALLOC(instance.data, newSize));
             instance.vb->resize(newSize);
         }
@@ -114,7 +111,7 @@ void InstancedBuffer::merge(scene::SubModel *subModel, uint32_t passIdx, gfx::Sh
         if (instance.descriptorSet != descriptorSet) {
             instance.descriptorSet = descriptorSet;
         }
-        memcpy(instance.data + static_cast<size_t>(instance.stride) * instance.drawInfo.instanceCount++, attrs.buffer.buffer()->getData(), stride);
+        memcpy(instance.data + instance.stride * instance.drawInfo.instanceCount++, attrs.buffer.buffer()->getData(), stride);
         _hasPendingModels = true;
         return;
     }
