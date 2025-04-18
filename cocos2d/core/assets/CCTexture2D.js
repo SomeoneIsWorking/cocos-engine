@@ -942,6 +942,7 @@ var Texture2D = cc.Class({
 
     _updateFormat () {
         this._isAlphaAtlas = this._format === PixelFormat.RGBA_ETC1 || this._format === PixelFormat.RGB_A_PVRTC_4BPPV1 || this._format === PixelFormat.RGB_A_PVRTC_2BPPV1;
+        this._texture._isAlphaAtlas = this._isAlphaAtlas;
         if (CC_JSB) {
             this._texture.setAlphaAtlas(this._isAlphaAtlas);
         }
