@@ -14,6 +14,10 @@ using namespace spine;
 HashMap<SkeletonData *, HashMap<Attachment *, AttachmentVertices *>*> spineAttachmentVerticesMap{};
 HashMap<SkeletonData *, HashMap<spine::String, spine::String>*> spineTexturesMap{};
 
+#ifdef CC_SPINE_VERSION_4_2
+HashMap<SkeletonData *, Atlas*> spineAtlasMap{};
+#endif
+
 
 static const uint16_t quadTriangles[6] = {0, 1, 2, 2, 3, 0};
 
@@ -171,57 +175,70 @@ SkeletonData* SpineWasmUtil::querySpineSkeletonDataByUUID(const String& uuid) {
 }
 
 SkeletonData* SpineWasmUtil::createSpineSkeletonDataWithJson(const String& jsonStr, const String& altasStr, const spine::Vector<spine::String>& textureNames, const spine::Vector<spine::String>& textureUUIDs) {
+    SkeletonData* skeletonData = nullptr;
 #if ENABLE_JSON_PARSER
     auto* atlas = new Atlas(altasStr.buffer(), altasStr.length(), "", nullptr, false);
     if (!atlas) {
         return nullptr;
     }
-    AttachmentLoader* attachmentLoader = new AtlasAttachmentLoaderExtension(atlas);
-    #ifdef CC_SPINE_VERSION_3_8
-    SkeletonJson json(attachmentLoader);
-    #else
-    SkeletonJson json(attachmentLoader, true);
-    #endif
-    json.setScale(1.0F);
-    SkeletonData* skeletonData = json.readSkeletonData(jsonStr.buffer());
-    auto& errorMsg = json.getError();
-    if (!errorMsg.isEmpty()) {
-        logToConsole(errorMsg.buffer(), LOG_LEVEL_WARN);
-    }
+    {
+        AttachmentLoader* attachmentLoader = new AtlasAttachmentLoaderExtension(atlas);
+        #ifdef CC_SPINE_VERSION_3_8
+        SkeletonJson json(attachmentLoader);
+        #else
+        SkeletonJson json(attachmentLoader, true);
+        #endif
+        json.setScale(1.0F);
+        skeletonData = json.readSkeletonData(jsonStr.buffer());
+        auto& errorMsg = json.getError();
+        if (!errorMsg.isEmpty()) {
+            logToConsole(errorMsg.buffer(), LOG_LEVEL_WARN);
+        }
 
-    saveAttachmentVertices(skeletonData, textureNames, textureUUIDs);
+        saveAttachmentVertices(skeletonData, textureNames, textureUUIDs);
+    }
+#ifdef CC_SPINE_VERSION_3_8
+    delete atlas;
+#else
+    spineAtlasMap.put(skeletonData, atlas);
+#endif
+
+#endif
 
     return skeletonData;
-#else
-    return nullptr;
-#endif
 }
 
 SkeletonData* SpineWasmUtil::createSpineSkeletonDataWithBinary(uint32_t byteSize, const String& altasStr, const spine::Vector<spine::String>& textureNames, const spine::Vector<spine::String>& textureUUIDs) {
+    SkeletonData* skeletonData = nullptr;
 #if ENABLE_BINARY_PARSER
     auto* atlas = new Atlas(altasStr.buffer(), altasStr.length(), "", nullptr, false);
     if (!atlas) {
         return nullptr;
     }
-    AttachmentLoader* attachmentLoader = new AtlasAttachmentLoaderExtension(atlas);
-    #ifdef CC_SPINE_VERSION_3_8
-    SkeletonBinary binary(attachmentLoader);
-    #else
-    SkeletonBinary binary(attachmentLoader, true);
-    #endif
-    binary.setScale(1.0F);
-    SkeletonData* skeletonData = binary.readSkeletonData(s_mem, byteSize);
-    auto& errorMsg = binary.getError();
-    if (!errorMsg.isEmpty()) {
-        logToConsole(errorMsg.buffer(), LOG_LEVEL_WARN);
+    {
+        AttachmentLoader* attachmentLoader = new AtlasAttachmentLoaderExtension(atlas);
+        #ifdef CC_SPINE_VERSION_3_8
+        SkeletonBinary binary(attachmentLoader);
+        #else
+        SkeletonBinary binary(attachmentLoader, true);
+        #endif
+        binary.setScale(1.0F);
+        skeletonData = binary.readSkeletonData(s_mem, byteSize);
+        auto& errorMsg = binary.getError();
+        if (!errorMsg.isEmpty()) {
+            logToConsole(errorMsg.buffer(), LOG_LEVEL_WARN);
+        }
+
+        saveAttachmentVertices(skeletonData, textureNames, textureUUIDs);
     }
-
-    saveAttachmentVertices(skeletonData, textureNames, textureUUIDs);
-
-    return skeletonData;
+#ifdef CC_SPINE_VERSION_3_8
+    delete atlas;
 #else
-    return nullptr;
+    spineAtlasMap.put(skeletonData, atlas);
 #endif
+
+#endif
+    return skeletonData;
 }
 
 void SpineWasmUtil::registerSpineSkeletonDataWithUUID(SkeletonData* data, const String& uuid) {
@@ -246,6 +263,10 @@ void SpineWasmUtil::destroySpineSkeletonDataWithUUID(const String& uuid) {
 
             spineAttachmentVerticesMap.remove(data);
         }
+#ifndef CC_SPINE_VERSION_3_8
+        auto* atlas = spineAtlasMap[data];
+        delete atlas;
+#endif        
         delete data;
         skeletonDataMap.remove(uuid);
     }
