@@ -974,7 +974,7 @@ export class ArmatureDisplay extends UIRenderer {
 
         if (!EDITOR_NOT_IN_PREVIEW) {
             if (this._cacheMode === AnimationCacheMode.PRIVATE_CACHE) {
-                this._armatureCache!.dispose();
+                this._armatureCache?.dispose();
                 this._armatureCache = null;
                 this._armature = null;
             } else if (this._cacheMode === AnimationCacheMode.SHARED_CACHE) {
