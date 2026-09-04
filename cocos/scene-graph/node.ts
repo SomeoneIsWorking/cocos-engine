@@ -1782,6 +1782,21 @@ export class Node extends CCObject implements ISchedulable, CustomSerializable {
     }
 
     /**
+     * @en Sets this node and every descendant to the specified layer.
+     * @zh 将此节点及其所有后代设置为指定层。
+     */
+    public setLayerWithAllChildren (layer: number): void {
+        this._setNodeLayerWithChildren(this, layer);
+    }
+
+    private _setNodeLayerWithChildren (node: Node, layer: number): void {
+        node.layer = layer;
+        node.children.forEach((child): void => {
+            this._setNodeLayerWithChildren(child, layer);
+        });
+    }
+
+    /**
      * @zh 节点的变换改动版本号。
      * @en The transformation change version number of the node.
      * @engineInternal
