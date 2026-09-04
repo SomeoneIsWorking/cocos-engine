@@ -22,6 +22,7 @@
  THE SOFTWARE.
 ****************************************************************************/
 #include "plugins/bus/EventBus.h"
+#include <algorithm>
 #include <cstring>
 #include <unordered_map>
 #include "base/Macros.h"

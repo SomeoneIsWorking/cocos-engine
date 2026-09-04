@@ -23,7 +23,9 @@
 ****************************************************************************/
 #pragma once
 
+#include <array>
 #include <cassert>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -255,7 +257,7 @@ struct EventCallback : EventCallbackBase {
     }
 
     const char *signature() override {
-        //return typeid(arg_tuple_type).name();
+        // return typeid(arg_tuple_type).name();
         return impl::SIGNATURE;
     }
 };
