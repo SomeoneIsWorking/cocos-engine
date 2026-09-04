@@ -210,9 +210,10 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
             snprintf(serv, sizeof(serv) - 1, "*%s*%d*", "lucidasans", _fontSize);
             _font = XLoadQueryFont(_dis, serv);
             if (!_font) {
-                _font = XLoadQueryFont(_dis, serv);
+                _font = XLoadQueryFont(_dis, "fixed");
             }
         }
+        CC_ASSERT_NOT_NULL(_font);
     } while (false);
 }
 
