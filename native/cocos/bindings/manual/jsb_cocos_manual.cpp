@@ -755,13 +755,13 @@ static bool js_readFile_doJob(const ccstd::string &fullPath, typename ReadFileDo
 }
 
 template <typename T, bool isJson>
-static void js_readFile_invokeCallback(bool doJobSucceed, const typename ReadFileDoJobReturnType<T, isJson>::value &content, const std::shared_ptr<se::Value> &callbackPtr) {
+static void js_readFile_invokeCallback(bool doJobSucceed, const ccstd::string &fullPath, const typename ReadFileDoJobReturnType<T, isJson>::value &content, const std::shared_ptr<se::Value> &callbackPtr) {
     se::AutoHandleScope hs;
     se::ValueArray seArgs;
     seArgs.reserve(2);
 
     if (!doJobSucceed) {
-        seArgs.emplace_back(se::Value("readFile failed!"));
+        seArgs.emplace_back(se::Value("readFile failed: " + fullPath));
         seArgs.emplace_back(se::Value::Null);
         callbackPtr->toObject()->call(seArgs, nullptr);
         return;
@@ -797,31 +797,31 @@ static void js_readFile_invokeCallback(bool doJobSucceed, const typename ReadFil
     }
 }
 
-#define JSB_READ_FILE(funcName, type, isJson)                                                             \
-    static bool funcName(se::State &s) {                                                                  \
-        ccstd::string fullPath;                                                                           \
-        std::shared_ptr<se::Value> callbackPtr;                                                           \
-        bool ok = js_readFile_getParameters(s, fullPath, callbackPtr);                                    \
-        if (!ok) return false;                                                                            \
-                                                                                                          \
-        gIOThreadPool->pushTask([fullPath, callbackPtr](int /* tid */) {                                  \
-            ReadFileDoJobReturnType<type, isJson>::value content;                                         \
-            bool doJobSucceed = js_readFile_doJob<type, isJson>(fullPath, content);                       \
-            auto app = CC_CURRENT_APPLICATION();                                                          \
-            if (!app) {                                                                                   \
-                return;                                                                                   \
-            }                                                                                             \
-            auto engine = app->getEngine();                                                               \
-            if (!engine) {                                                                                \
-                return;                                                                                   \
-            }                                                                                             \
-            engine->getScheduler()->performFunctionInCocosThread([doJobSucceed, content, callbackPtr]() { \
-                js_readFile_invokeCallback<type, isJson>(doJobSucceed, content, callbackPtr);             \
-            });                                                                                           \
-        });                                                                                               \
-                                                                                                          \
-        return true;                                                                                      \
-    }                                                                                                     \
+#define JSB_READ_FILE(funcName, type, isJson)                                                                       \
+    static bool funcName(se::State &s) {                                                                            \
+        ccstd::string fullPath;                                                                                     \
+        std::shared_ptr<se::Value> callbackPtr;                                                                     \
+        bool ok = js_readFile_getParameters(s, fullPath, callbackPtr);                                              \
+        if (!ok) return false;                                                                                      \
+                                                                                                                    \
+        gIOThreadPool->pushTask([fullPath, callbackPtr](int /* tid */) {                                            \
+            ReadFileDoJobReturnType<type, isJson>::value content;                                                   \
+            bool doJobSucceed = js_readFile_doJob<type, isJson>(fullPath, content);                                 \
+            auto app = CC_CURRENT_APPLICATION();                                                                    \
+            if (!app) {                                                                                             \
+                return;                                                                                             \
+            }                                                                                                       \
+            auto engine = app->getEngine();                                                                         \
+            if (!engine) {                                                                                          \
+                return;                                                                                             \
+            }                                                                                                       \
+            engine->getScheduler()->performFunctionInCocosThread([doJobSucceed, fullPath, content, callbackPtr]() { \
+                js_readFile_invokeCallback<type, isJson>(doJobSucceed, fullPath, content, callbackPtr);             \
+            });                                                                                                     \
+        });                                                                                                         \
+                                                                                                                    \
+        return true;                                                                                                \
+    }                                                                                                               \
     SE_BIND_FUNC(funcName)
 
 JSB_READ_FILE(js_readTextFile, ccstd::string, false)
