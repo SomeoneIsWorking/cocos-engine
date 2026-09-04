@@ -348,6 +348,21 @@ nodeProto.resumeSystemEvents = function resumeSystemEvents(recursive: boolean): 
 
 nodeProto.getWritableComponents = function (this: JsbNode) { return this._components; };
 
+nodeProto.setLayerWithAllChildren = function (this: JsbNode, layer: number): void {
+    this._setNodeLayerWithChildren(this, layer);
+};
+
+nodeProto._setNodeLayerWithChildren = function (
+    this: JsbNode,
+    node: JsbNode,
+    layer: number,
+): void {
+    node.layer = layer;
+    node.children.forEach((child: JsbNode): void => {
+        this._setNodeLayerWithChildren(child, layer);
+    });
+};
+
 nodeProto._setActiveInHierarchy = function (this: JsbNode, v: boolean) { return this._activeInHierarchy = v; };
 
 nodeProto._removeComponent = function (component: Component) {
