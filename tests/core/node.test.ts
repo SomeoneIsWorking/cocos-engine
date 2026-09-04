@@ -8,6 +8,25 @@ import { Event } from "../../exports/base";
 
 describe(`Node`, () => {
 
+    test('setLayerWithAllChildren', () => {
+        const root = new Node('root');
+        const child = new Node('child');
+        const sibling = new Node('sibling');
+        const grandchild = new Node('grandchild');
+        const unrelated = new Node('unrelated');
+        child.parent = root;
+        sibling.parent = root;
+        grandchild.parent = child;
+
+        root.setLayerWithAllChildren(1 << 12);
+
+        expect(root.layer).toBe(1 << 12);
+        expect(child.layer).toBe(1 << 12);
+        expect(sibling.layer).toBe(1 << 12);
+        expect(grandchild.layer).toBe(1 << 12);
+        expect(unrelated.layer).not.toBe(1 << 12);
+    });
+
     test('@inverseTransformPoint', () => {
         let scene = new Scene('temp');
         let parentNode = new Node();
