@@ -322,6 +322,29 @@ static bool js_cocos2dx_dragonbones_Slot_get_displayIndex(se::State &s) {
 }
 SE_BIND_PROP_GET(js_cocos2dx_dragonbones_Slot_get_displayIndex)
 
+static bool js_cocos2dx_dragonbones_Slot_setDisplayIndexInternal(se::State &s) {
+    const auto &args = s.args();
+    const size_t argc = args.size();
+    if (argc == 1 || argc == 2) {
+        dragonBones::Slot *cobj = (dragonBones::Slot *)s.nativeThisObject();
+        SE_PRECONDITION2(cobj, false, "Invalid Native Object");
+        int32_t displayIndex = 0;
+        bool isAnimation = false;
+        bool ok = sevalue_to_native(args[0], &displayIndex);
+        if (argc == 2) {
+            ok &= sevalue_to_native(args[1], &isAnimation);
+        }
+        SE_PRECONDITION2(ok, false, "Error processing arguments");
+        const bool changed = cobj->_setDisplayIndex(displayIndex, isAnimation);
+        ok = nativevalue_to_se(changed, s.rval());
+        SE_PRECONDITION2(ok, false, "Convert _setDisplayIndex result to se::Value failed!");
+        return true;
+    }
+    SE_REPORT_ERROR("wrong number of arguments: %d, was expecting 1 or 2", (int)argc);
+    return false;
+}
+SE_BIND_FUNC(js_cocos2dx_dragonbones_Slot_setDisplayIndexInternal)
+
 static bool js_cocos2dx_dragonbones_Slot_setDisplay(se::State &s) {
     const auto &args = s.args();
     int argc = (int)args.size();
@@ -423,6 +446,7 @@ bool register_all_dragonbones_manual(se::Object *obj) {
     __jsb_dragonBones_DragonBonesData_proto->defineProperty("armatureNames", _SE(js_cocos2dx_dragonbones_DragonBonesData_get_armatureNames), nullptr);
 
     __jsb_dragonBones_Slot_proto->defineProperty("displayIndex", _SE(js_cocos2dx_dragonbones_Slot_get_displayIndex), _SE(js_cocos2dx_dragonbones_Slot_set_displayIndex));
+    __jsb_dragonBones_Slot_proto->defineFunction("_setDisplayIndex", _SE(js_cocos2dx_dragonbones_Slot_setDisplayIndexInternal));
     __jsb_dragonBones_Slot_proto->defineFunction("getDisplay", _SE(js_cocos2dx_dragonbones_Slot_getDisplay));
     __jsb_dragonBones_Slot_proto->defineFunction("setDisplay", _SE(js_cocos2dx_dragonbones_Slot_setDisplay));
 
