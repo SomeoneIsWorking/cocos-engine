@@ -701,6 +701,9 @@ static bool js_readFile_getParameters(se::State &s, ccstd::string &fullPath, std
 
         // fullPathForFilename is not threadsafe, so don't invoke it in thread pool.
         fullPath = cc::FileUtils::getInstance()->fullPathForFilename(path);
+        if (fullPath.empty()) {
+            fullPath = path;
+        }
         return true;
     }
     SE_REPORT_ERROR("wrong number of arguments: %d, was expecting %d", (int)argc, 2);
