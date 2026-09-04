@@ -107,7 +107,7 @@ static PFNGLES3WLOADPROC pfnGles3wLoad = nullptr;
 
 bool gles3wOpen() {
     libegl = dlopen("libEGL.so", RTLD_LAZY | RTLD_GLOBAL);
-    libgles = dlopen("libGLESv3.so", RTLD_LAZY | RTLD_GLOBAL);
+    libgles = dlopen("libGLESv2.so", RTLD_LAZY | RTLD_GLOBAL);
     return (libegl && libgles);
 }
 
