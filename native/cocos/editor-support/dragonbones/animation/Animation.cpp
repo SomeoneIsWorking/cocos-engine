@@ -7,8 +7,7 @@
 #include "../model/DisplayData.h"
 #include "../model/DragonBonesData.h"
 #include "AnimationState.h"
-
-#include <cstdio>
+#include "base/Log.h"
 
 DRAGONBONES_NAMESPACE_BEGIN
 
@@ -194,14 +193,10 @@ AnimationState* Animation::playConfig(AnimationConfig* animationConfig) {
     if (_animations.find(animationName) == _animations.end()) {
         const auto* armatureData = _armature->getArmatureData();
         const auto* dragonBonesData = armatureData != nullptr ? armatureData->parent : nullptr;
-        std::fprintf(
-            stderr,
-            "DragonBones: non-existent animation; data=%s armature=%s animation=%s\n",
+        CC_LOG_WARNING(
+            "DragonBones: non-existent animation; data=%s armature=%s animation=%s",
             dragonBonesData != nullptr ? dragonBonesData->name.c_str() : "<none>",
-            armatureData != nullptr ? armatureData->name.c_str() : "<none>",
-            animationName.c_str());
-        std::fflush(stderr);
-        DRAGONBONES_ASSERT(false, "Non-existent animation.");
+            _armature->getName().c_str(), animationName.c_str());
 
         return nullptr;
     }
