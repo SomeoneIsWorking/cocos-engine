@@ -3356,6 +3356,7 @@ elseif(LINUX)
         ${LINUX_GRAPHIC_LIBS}
         ${CC_EXTERNAL_LIBS}
     )
+    include(${CWD}/tests/linux-canvas/configure.cmake)
 endif()
 
 ### set source_group for generated files
