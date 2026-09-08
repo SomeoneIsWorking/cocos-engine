@@ -50,6 +50,35 @@ test('duration survives playback and stopping', async () => {
     player.destroy();
 });
 
+test('shared native cache remains until the last player is destroyed', async () => {
+    const first = await AudioPlayer.load('shared.mp3');
+    const second = await AudioPlayer.load('shared.mp3');
+
+    first.destroy();
+    expect(nativeAudio.uncache).not.toHaveBeenCalled();
+    second.destroy();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(1);
+    expect(nativeAudio.uncache).toHaveBeenCalledWith('shared.mp3');
+    first.destroy();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(1);
+});
+
+test('one-shot cache is released on stop and finish', async () => {
+    const stopped = await AudioPlayer.loadOneShotAudio('stopped.mp3', 0.5);
+    stopped.play();
+    stopped.stop();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(1);
+    expect(nativeAudio.uncache).toHaveBeenCalledWith('stopped.mp3');
+
+    const finished = await AudioPlayer.loadOneShotAudio('finished.mp3', 0.5);
+    finished.play();
+    const finish = nativeAudio.setFinishCallback.mock.calls.at(-1)?.[1] as (() => void) | undefined;
+    expect(finish).toBeDefined();
+    finish?.();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(2);
+    expect(nativeAudio.uncache).toHaveBeenLastCalledWith('finished.mp3');
+});
+
 test.each([
     { totalFrames: 0, sampleRate: 0 },
     { totalFrames: 120000, sampleRate: 0 },
