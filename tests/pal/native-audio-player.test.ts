@@ -63,6 +63,14 @@ test('shared native cache remains until the last player is destroyed', async () 
     expect(nativeAudio.uncache).toHaveBeenCalledTimes(1);
 });
 
+test('direct preload does not evict a player-owned shared cache', async () => {
+    const player = await AudioPlayer.load('direct-preload.mp3');
+    await AudioPlayer.loadNative('direct-preload.mp3');
+    player.destroy();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(1);
+    expect(nativeAudio.uncache).toHaveBeenCalledWith('direct-preload.mp3');
+});
+
 test('one-shot cache is released on stop and finish', async () => {
     const stopped = await AudioPlayer.loadOneShotAudio('stopped.mp3', 0.5);
     stopped.play();
@@ -77,6 +85,12 @@ test('one-shot cache is released on stop and finish', async () => {
     finish?.();
     expect(nativeAudio.uncache).toHaveBeenCalledTimes(2);
     expect(nativeAudio.uncache).toHaveBeenLastCalledWith('finished.mp3');
+
+    nativeAudio.play2d.mockReturnValueOnce(-1);
+    const failed = await AudioPlayer.loadOneShotAudio('failed-play.mp3', 0.5);
+    failed.play();
+    expect(nativeAudio.uncache).toHaveBeenCalledTimes(3);
+    expect(nativeAudio.uncache).toHaveBeenLastCalledWith('failed-play.mp3');
 });
 
 test.each([
