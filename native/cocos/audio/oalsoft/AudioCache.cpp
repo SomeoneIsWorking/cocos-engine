@@ -27,7 +27,10 @@
 
 #include "audio/oalsoft/AudioCache.h"
 #include <algorithm>
+#include <limits>
+#include <optional>
 #include <thread>
+#include <vector>
 #include "application/ApplicationManager.h"
 #include "audio/common/decoder/AudioDecoder.h"
 #include "audio/common/decoder/AudioDecoderManager.h"
@@ -47,9 +50,35 @@ namespace {
 unsigned int gIdIndex = 0;
 }
 
-#define PCMDATA_CACHEMAXSIZE 1048576
+constexpr uint32_t kPcmDataCacheMaxSize = 1048576;
+constexpr uint32_t kProbeBufferBytes = 64 * 1024;
 
-using namespace cc; //NOLINT
+std::optional<uint32_t> measureDecodedFrames(cc::AudioDecoder &decoder, uint32_t bytesPerFrame,
+                                             uint32_t sampleRate) {
+    if (bytesPerFrame == 0 || sampleRate == 0 || !decoder.seek(0)) {
+        return std::nullopt;
+    }
+    const uint32_t bufferFrames = std::max(1U, kProbeBufferBytes / bytesPerFrame);
+    const uint64_t bufferBytes = static_cast<uint64_t>(bufferFrames) * bytesPerFrame;
+    if (bufferBytes > std::numeric_limits<std::size_t>::max()) {
+        return std::nullopt;
+    }
+    std::vector<char> buffer(static_cast<size_t>(bufferBytes));
+    uint64_t measuredFrames = 0;
+    while (true) {
+        const uint32_t framesRead = decoder.read(bufferFrames, buffer.data());
+        if (framesRead == 0) {
+            break;
+        }
+        measuredFrames += framesRead;
+        if (measuredFrames > std::numeric_limits<uint32_t>::max()) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<uint32_t>(measuredFrames);
+}
+
+using namespace cc; // NOLINT
 
 AudioCache::AudioCache()
 : _isDestroyed(std::make_shared<bool>(false)), _id(++gIdIndex) {
@@ -71,7 +100,7 @@ AudioCache::~AudioCache() {
         ALOGVV("id=%u, waiting readData thread to finish ...", _id);
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    //wait for the 'readDataTask' task to exit
+    // wait for the 'readDataTask' task to exit
     _readDataTaskMutex.lock();
     _readDataTaskMutex.unlock();
 
@@ -98,7 +127,7 @@ AudioCache::~AudioCache() {
 }
 
 void AudioCache::readDataTask(unsigned int selfId) {
-    //Note: It's in sub thread
+    // Note: It's in sub thread
     ALOGVV("readDataTask begin, cache id=%u", selfId);
 
     _readDataTaskMutex.lock();
@@ -110,64 +139,36 @@ void AudioCache::readDataTask(unsigned int selfId) {
             break;
         }
 
-        const uint32_t originalTotalFrames = decoder->getTotalFrames();
         _bytesPerFrame = decoder->getBytesPerFrame();
         const uint32_t sampleRate = decoder->getSampleRate();
         _channelCount = decoder->getChannelCount();
 
-        uint32_t totalFrames = originalTotalFrames;
-        uint32_t dataSize = totalFrames * _bytesPerFrame;
-        uint32_t remainingFrames = totalFrames;
-        uint32_t adjustFrames = 0;
+        uint32_t totalFrames = decoder->getTotalFrames();
+        bool useStreaming = totalFrames > 0 &&
+                            static_cast<uint64_t>(totalFrames) * _bytesPerFrame > kPcmDataCacheMaxSize;
+        if (!useStreaming) {
+            const auto measuredFrames = measureDecodedFrames(*decoder, _bytesPerFrame, sampleRate);
+            BREAK_IF_ERR_LOG(!measuredFrames.has_value(), "AudioDecoder frame measurement failed");
+            totalFrames = measuredFrames.value();
+            useStreaming = static_cast<uint64_t>(totalFrames) * _bytesPerFrame > kPcmDataCacheMaxSize;
+            BREAK_IF_ERR_LOG(totalFrames == 0, "AudioDecoder produced no PCM frames");
+            BREAK_IF_ERR_LOG(!decoder->seek(0), "AudioDecoder::seek(0) failed after frame measurement");
+        }
+        BREAK_IF_ERR_LOG(_bytesPerFrame == 0 || sampleRate == 0, "AudioDecoder returned an invalid PCM header");
+        BREAK_IF_ERR_LOG(static_cast<uint64_t>(totalFrames) * _bytesPerFrame > std::numeric_limits<uint32_t>::max(),
+                         "AudioDecoder PCM size exceeds the native buffer limit");
+        const uint32_t dataSize = totalFrames * _bytesPerFrame;
 
         _format = _channelCount > 1 ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
         _sampleRate = static_cast<ALsizei>(sampleRate);
         _duration = 1.0F * totalFrames / sampleRate;
         _totalFrames = totalFrames;
 
-        if (dataSize <= PCMDATA_CACHEMAXSIZE) {
-            uint32_t framesRead = 0;
-            const uint32_t framesToReadOnce = std::min(totalFrames, static_cast<uint32_t>(sampleRate * QUEUEBUFFER_TIME_STEP * QUEUEBUFFER_NUM));
-
-            ccstd::vector<char> adjustFrameBuf;
-
-            if (decoder->seek(totalFrames)) {
-                auto *tmpBuf = static_cast<char *>(malloc(framesToReadOnce * _bytesPerFrame));
-                adjustFrameBuf.reserve(framesToReadOnce * _bytesPerFrame);
-
-                // Adjust total frames by setting position to the end of frames and try to read more data.
-                // This is a workaround for https://github.com/cocos2d/cocos2d-x/issues/16938
-                do {
-                    framesRead = decoder->read(framesToReadOnce, tmpBuf);
-                    if (framesRead > 0) {
-                        adjustFrames += framesRead;
-                        adjustFrameBuf.insert(adjustFrameBuf.end(), tmpBuf, tmpBuf + framesRead * _bytesPerFrame);
-                    }
-
-                } while (framesRead > 0);
-
-                if (adjustFrames > 0) {
-                    ALOGV("Orignal total frames: %u, adjust frames: %u, current total frames: %u", totalFrames, adjustFrames, totalFrames + adjustFrames);
-                    totalFrames += adjustFrames;
-                    _totalFrames = remainingFrames = totalFrames;
-                }
-
-                // Reset dataSize
-                dataSize = totalFrames * _bytesPerFrame;
-
-                free(tmpBuf);
-            }
-            // Reset to frame 0
-            BREAK_IF_ERR_LOG(!decoder->seek(0), "AudioDecoder::seek(0) failed!");
-
+        if (!useStreaming) {
             _pcmData = static_cast<char *>(malloc(dataSize));
 
             CC_ASSERT(_pcmData);
             memset(_pcmData, 0x00, dataSize);
-
-            if (adjustFrames > 0) {
-                memcpy(_pcmData + (dataSize - adjustFrameBuf.size()), adjustFrameBuf.data(), adjustFrameBuf.size());
-            }
 
             alGenBuffers(1, &_alBufferId);
             auto alError = alGetError();
@@ -180,38 +181,14 @@ void AudioCache::readDataTask(unsigned int selfId) {
                 break;
             }
 
-            framesRead = decoder->readFixedFrames(std::min(framesToReadOnce, remainingFrames), _pcmData + _framesRead * _bytesPerFrame);
-            _framesRead += framesRead;
-            remainingFrames -= framesRead;
+            const uint32_t framesRead = decoder->readFixedFrames(totalFrames, _pcmData);
+            _framesRead = framesRead;
 
             if (*_isDestroyed) {
                 break;
             }
 
-            uint32_t frames = 0;
-            while (!*_isDestroyed && _framesRead < originalTotalFrames) {
-                frames = std::min(framesToReadOnce, remainingFrames);
-                if (_framesRead + frames > originalTotalFrames) {
-                    frames = originalTotalFrames - _framesRead;
-                }
-                framesRead = decoder->read(frames, _pcmData + _framesRead * _bytesPerFrame);
-                if (framesRead == 0) {
-                    break;
-                }
-                _framesRead += framesRead;
-                remainingFrames -= framesRead;
-            }
-
-            if (*_isDestroyed) {
-                break;
-            }
-
-            if (_framesRead < originalTotalFrames) {
-                memset(_pcmData + _framesRead * _bytesPerFrame, 0x00, (totalFrames - _framesRead) * _bytesPerFrame);
-            }
-            ALOGV("pcm buffer was loaded successfully, total frames: %u, total read frames: %u, adjust frames: %u, remainingFrames: %u", totalFrames, _framesRead, adjustFrames, remainingFrames);
-
-            _framesRead += adjustFrames;
+            ALOGV("pcm buffer was loaded successfully, total frames: %u, total read frames: %u", totalFrames, _framesRead);
 
             alBufferData(_alBufferId, _format, _pcmData, static_cast<ALsizei>(dataSize), static_cast<ALsizei>(sampleRate));
 
@@ -250,7 +227,7 @@ void AudioCache::readDataTask(unsigned int selfId) {
         }
     }
 
-    //IDEA: Why to invoke play callback first? Should it be after 'load' callback?
+    // IDEA: Why to invoke play callback first? Should it be after 'load' callback?
     invokingPlayCallbacks();
     invokingLoadCallbacks();
 
