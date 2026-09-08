@@ -35,6 +35,23 @@ const urlCount: Record<string, number> = {};
 const audioEngine = jsb.AudioEngine;
 const INVALID_AUDIO_ID = -1;
 
+function retainAudioUrl (url: string): void {
+    urlCount[url] = (urlCount[url] ?? 0) + 1;
+}
+
+function releaseAudioUrl (url: string): void {
+    const count = urlCount[url];
+    if (count === undefined) {
+        return;
+    }
+    if (count <= 1) {
+        delete urlCount[url];
+        audioEngine.uncache(url);
+        return;
+    }
+    urlCount[url] = count - 1;
+}
+
 enum AudioBufferFormat {
     UNKNOWN = 0,
     SIGNED_8,
@@ -69,6 +86,7 @@ export class OneShotAudio {
     private _id: number = INVALID_AUDIO_ID;
     private _url: string;
     private _volume: number;
+    private _cacheRetained = true;
     private _onPlayCb?: () => void;
     get onPlay (): (() => void) | undefined {
         return this._onPlayCb;
@@ -88,10 +106,27 @@ export class OneShotAudio {
     private constructor (url: string, volume: number)  {
         this._url = url;
         this._volume = volume;
+        retainAudioUrl(url);
+    }
+    private _releaseCache (): void {
+        if (this._cacheRetained) {
+            this._cacheRetained = false;
+            releaseAudioUrl(this._url);
+        }
     }
     public play (): void {
+        if (!this._cacheRetained) {
+            retainAudioUrl(this._url);
+            this._cacheRetained = true;
+        }
         this._id = jsb.AudioEngine.play2d(this._url, false, this._volume);
+        if (this._id === INVALID_AUDIO_ID) {
+            this._releaseCache();
+            return;
+        }
         jsb.AudioEngine.setFinishCallback(this._id, () => {
+            this._id = INVALID_AUDIO_ID;
+            this._releaseCache();
             this.onEnd?.();
         });
         this.onPlay?.();
@@ -101,6 +136,8 @@ export class OneShotAudio {
             return;
         }
         jsb.AudioEngine.stop(this._id);
+        this._id = INVALID_AUDIO_ID;
+        this._releaseCache();
     }
 }
 
@@ -109,6 +146,7 @@ export class AudioPlayer implements OperationQueueable {
     private _id: number = INVALID_AUDIO_ID;
     private _state: AudioState = AudioState.INIT;
     private _pcmHeader: jsb.PCMHeader;
+    private _cacheRetained = false;
 
     /**
      * @deprecated since v3.5.0, this is an engine private interface that will be removed in the future.
@@ -135,6 +173,8 @@ export class AudioPlayer implements OperationQueueable {
             throw new Error(`Invalid native audio timing metadata: ${url}`);
         }
         this._pcmHeader = header;
+        retainAudioUrl(url);
+        this._cacheRetained = true;
         // event
         game.on(Game.EVENT_PAUSE, this._onInterruptedBegin, this);
         game.on(Game.EVENT_RESUME, this._onInterruptedEnd, this);
@@ -142,8 +182,12 @@ export class AudioPlayer implements OperationQueueable {
     destroy (): void {
         game.off(Game.EVENT_PAUSE, this._onInterruptedBegin, this);
         game.off(Game.EVENT_RESUME, this._onInterruptedEnd, this);
-        if (--urlCount[this._url] <= 0) {
-            audioEngine.uncache(this._url);
+        this._releaseCache();
+    }
+    private _releaseCache (): void {
+        if (this._cacheRetained) {
+            this._cacheRetained = false;
+            releaseAudioUrl(this._url);
         }
     }
     private _onInterruptedBegin (): void {
