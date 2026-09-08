@@ -108,7 +108,7 @@ export class AudioPlayer implements OperationQueueable {
     private _url: string;
     private _id: number = INVALID_AUDIO_ID;
     private _state: AudioState = AudioState.INIT;
-    private _pcmHeader: jsb.PCMHeader | null;
+    private _pcmHeader: jsb.PCMHeader;
 
     /**
      * @deprecated since v3.5.0, this is an engine private interface that will be removed in the future.
@@ -121,16 +121,20 @@ export class AudioPlayer implements OperationQueueable {
 
     // NOTE: we need to cache the state in case the audio id is invalid.
     private _cachedState = {
-        duration: 1, // wrong value before playing
         loop: false,
         currentTime: 0,
         volume: 1,
-    }
+    };
 
     constructor (url: string) {
         this._url = url;
-        // this._pcmHeader = audioEngine.getPCMHeader(url);
-        this._pcmHeader = null;
+        // Dynamic clips snapshot duration after preload, before playback has an ID.
+        const header = audioEngine.getPCMHeader(url);
+        if (!Number.isFinite(header.totalFrames) || header.totalFrames <= 0
+            || !Number.isFinite(header.sampleRate) || header.sampleRate <= 0) {
+            throw new Error(`Invalid native audio timing metadata: ${url}`);
+        }
+        this._pcmHeader = header;
         // event
         game.on(Game.EVENT_PAUSE, this._onInterruptedBegin, this);
         game.on(Game.EVENT_RESUME, this._onInterruptedEnd, this);
@@ -160,17 +164,17 @@ export class AudioPlayer implements OperationQueueable {
     static load (url: string, opts?: AudioLoadOptions): Promise<AudioPlayer> {
         return new Promise((resolve, reject) => {
             AudioPlayer.loadNative(url, opts).then((url) => {
-                resolve(new AudioPlayer(url as string));
+                resolve(new AudioPlayer(url));
             }).catch((err) => reject(err));
         });
     }
-    static loadNative (url: string, opts?: AudioLoadOptions): Promise<unknown> {
+    static loadNative (url: string, opts?: AudioLoadOptions): Promise<string> {
         return new Promise((resolve, reject) => {
             if (systemInfo.platform === Platform.WIN32) {
                 // NOTE: audioEngine.preload() not works well on Win32 platform.
                 // Especially when there is not audio output device. But still need to preload
-                audioEngine.preload(url, (isSuccess) => {
-                    console.debug('somehow preload success on windows');
+                audioEngine.preload(url, () => {
+                    resolve(url);
                 });
                 resolve(url);
             } else {
@@ -188,7 +192,8 @@ export class AudioPlayer implements OperationQueueable {
         return new Promise((resolve, reject) => {
             AudioPlayer.loadNative(url, opts).then((url) => {
                 // HACK: AudioPlayer should be a friend class in OneShotAudio
-                resolve(new (OneShotAudio as any)(url, volume));
+                const OneShotAudioConstructor = OneShotAudio as unknown as new (url: string, volume: number) => OneShotAudio;
+                resolve(new OneShotAudioConstructor(url, volume));
             }).catch(reject);
         });
     }
@@ -234,7 +239,7 @@ export class AudioPlayer implements OperationQueueable {
     }
     get duration (): number {
         if (!this._isValid) {
-            return this._cachedState.duration;
+            return this._pcmHeader.totalFrames / this._pcmHeader.sampleRate;
         }
         return audioEngine.getDuration(this._id);
     }
@@ -246,17 +251,11 @@ export class AudioPlayer implements OperationQueueable {
     }
 
     get sampleRate (): number {
-        if (this._pcmHeader === null) {
-            this._pcmHeader = jsb.AudioEngine.getPCMHeader(this._url);
-        }
         return this._pcmHeader.sampleRate;
     }
 
     public getPCMData (channelIndex: number): AudioPCMDataView | undefined {
         const arrayBuffer = audioEngine.getOriginalPCMBuffer(this._url, channelIndex);
-        if (this._pcmHeader === null) {
-            this._pcmHeader = jsb.AudioEngine.getPCMHeader(this._url);
-        }
         const audioBufferInfo = bufferConstructorMap[this._pcmHeader.audioFormat];
         if (!arrayBuffer || !audioBufferInfo) {
             return undefined;
@@ -273,7 +272,7 @@ export class AudioPlayer implements OperationQueueable {
                 audioEngine.setCurrentTime(this._id, time);
             }
             this._cachedState.currentTime = time;
-            return resolve();
+            resolve();
         });
     }
 
