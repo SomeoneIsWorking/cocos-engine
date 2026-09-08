@@ -1,0 +1,7 @@
+option(CC_BUILD_LINUX_CANVAS_TESTS "Build the Linux canvas resource lifecycle regression" OFF)
+if(CC_BUILD_LINUX_CANVAS_TESTS)
+    if(USE_SERVER_MODE)
+        message(FATAL_ERROR "Linux canvas lifecycle tests require the graphical platform")
+    endif()
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_BINARY_DIR}/linux-canvas-tests)
+endif()

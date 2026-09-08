@@ -85,11 +85,11 @@ public:
 
 private:
     static wchar_t *utf8ToUtf16(const ccstd::string &str, int *pRetLen = nullptr);
-    void removeCustomFont();
+    void releaseFont();
     int drawText(const ccstd::string &text, int x, int y);
     Size sizeWithText(const wchar_t *pszText, int nLen);
     void prepareBitmap(int nWidth, int nHeight);
-    void deleteBitmap();
+    void releaseBuffer();
     void fillTextureData();
     ccstd::array<float, 2> convertDrawPoint(Point point, const ccstd::string &text);
 
@@ -99,7 +99,7 @@ public:
     Drawable _win{0};
     Drawable _pixmap{0};
     XFontStruct *_font{0};
-    GC _gc;
+    GC _gc{nullptr};
 
 private:
     int32_t _x{0};

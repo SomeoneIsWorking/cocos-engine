@@ -27,6 +27,9 @@
 #include "platform/linux/LinuxPlatform.h"
 #include "platform/linux/modules/SystemWindow.h"
 
+#include <X11/X.h>
+#include <X11/Xlib.h>
+
 namespace {
 #define RGB(r, g, b)     (int)((int)r | (((int)g) << 8) | (((int)b) << 16))
 #define RGBA(r, g, b, a) (int)((int)r | (((int)g) << 8) | (((int)b) << 16) | (((int)a) << 24))
@@ -47,11 +50,13 @@ CanvasRenderingContext2DDelegate::CanvasRenderingContext2DDelegate() {
 }
 
 CanvasRenderingContext2DDelegate::~CanvasRenderingContext2DDelegate() {
-    XFreePixmap(_dis, _pixmap);
-    XFreeGC(_dis, _gc);
+    // The window manager owns the display; only release this canvas's resources.
+    releaseBuffer();
+    releaseFont();
 }
 
 void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
+    releaseBuffer();
     _bufferWidth = w;
     _bufferHeight = h;
     if (_bufferWidth < 1.0F || _bufferHeight < 1.0F) {
@@ -62,10 +67,6 @@ void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
     memset(data, 0x00, textureSize);
     _imageData.fastSet((uint8_t *)data, textureSize);
 
-    if (_pixmap) {
-        XFreePixmap(_dis, _pixmap);
-        _pixmap = 0;
-    }
     if (!_win) {
         return;
     }
@@ -185,10 +186,7 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
                  bold ? "*Bold" : "",
                  slant.c_str(),
                  _fontSize);
-        if (_font) {
-            XFreeFont(_dis, _font);
-            _font = 0;
-        }
+        releaseFont();
 
         _font = XLoadQueryFont(_dis, serv);
         if (!_font) {
@@ -241,8 +239,11 @@ const cc::Data &CanvasRenderingContext2DDelegate::getDataRef() const {
     return _imageData;
 }
 
-void CanvasRenderingContext2DDelegate::removeCustomFont() {
-    XFreeFont(_dis, None);
+void CanvasRenderingContext2DDelegate::releaseFont() {
+    if (_font) {
+        XFreeFont(_dis, _font);
+        _font = nullptr;
+    }
 }
 
 // x, y offset value
@@ -268,7 +269,16 @@ CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::sizeWit
 void CanvasRenderingContext2DDelegate::prepareBitmap(int nWidth, int nHeight) {
 }
 
-void CanvasRenderingContext2DDelegate::deleteBitmap() {
+void CanvasRenderingContext2DDelegate::releaseBuffer() {
+    if (_gc) {
+        XFreeGC(_dis, _gc);
+        _gc = nullptr;
+    }
+    if (_pixmap) {
+        XFreePixmap(_dis, _pixmap);
+        _pixmap = None;
+    }
+    _imageData.clear();
 }
 
 void CanvasRenderingContext2DDelegate::fillTextureData() {
