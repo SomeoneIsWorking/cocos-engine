@@ -11,3 +11,11 @@ checks zero-sized buffers, repeated buffer allocation and font replacement.
 Linker wrappers count actual Xlib resource acquisitions and releases; they do
 not replace allocation or rendering. Each phase requires exact balanced
 ownership, and missing display initialization is a failure.
+
+The same test calls the production window's `closeWindow()` and drains events
+through its window manager. It requires exactly one engine `CLOSE` event for
+that window, so a generic SDL `QUIT` notification cannot masquerade as the
+engine's close lifecycle. It consumes an SDL window ID before creating the
+engine window to prove the translation between their independent ID namespaces.
+An SDL event filter then rejects another close request: the engine must report
+the refusal through its logger and must not deliver a spurious close event.

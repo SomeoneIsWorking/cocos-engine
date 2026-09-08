@@ -24,15 +24,11 @@
 
 #include "platform/linux/modules/SystemWindow.h"
 
+#include <cstdint>
+#include "SDL2/SDL_error.h"
+#include "SDL2/SDL_events.h"
+#include "SDL2/SDL_video.h"
 #include "base/Log.h"
-#include "base/Macros.h"
-
-// SDL headers
-#include <functional>
-#include "SDL2/SDL.h"
-#include "SDL2/SDL_main.h"
-#include "SDL2/SDL_syswm.h"
-#include "engine/EngineEvents.h"
 #include "platform/SDLHelper.h"
 
 namespace cc {
@@ -78,9 +74,15 @@ bool SystemWindow::createWindow(const char *title,
 
 void SystemWindow::closeWindow() {
 #ifndef CC_SERVER_MODE
-    SDL_Event et;
-    et.type = SDL_QUIT;
-    SDL_PushEvent(&et);
+    SDL_Event event{};
+    event.type = SDL_WINDOWEVENT;
+    event.window.windowID = SDL_GetWindowID(_window);
+    event.window.event = SDL_WINDOWEVENT_CLOSE;
+    const int result = SDL_PushEvent(&event);
+    if (result <= 0) {
+        CC_LOG_ERROR("Window %u close request was not queued: %s", _windowId,
+                     result == 0 ? "rejected by SDL event filter" : SDL_GetError());
+    }
 #endif
 }
 
