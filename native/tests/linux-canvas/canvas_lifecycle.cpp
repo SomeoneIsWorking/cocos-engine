@@ -3,14 +3,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <vector>
 
 #include "application/ApplicationManager.h"
 #include "application/BaseGame.h"
+#include "engine/EngineEvents.h"
 #include "platform/BasePlatform.h"
 #include "platform/interfaces/modules/ISystemWindow.h"
 #include "platform/interfaces/modules/ISystemWindowManager.h"
 #include "platform/linux/modules/CanvasRenderingContext2DDelegate.h"
 
+#include <SDL2/SDL_events.h>
+#include <SDL2/SDL_video.h>
 #include <X11/X.h>
 #include <X11/Xlib.h>
 
@@ -30,6 +34,32 @@ void requireReleased() {
     require(graphicsContexts == 0, "graphics context was leaked or freed without acquisition");
     require(pixmaps == 0, "pixmap was leaked or freed without acquisition");
     require(fonts == 0, "font was leaked or freed without acquisition");
+}
+
+void verifyWindowClose(cc::ISystemWindowManager &windows, cc::ISystemWindow &window) {
+    // Flush initial window notifications before observing the close request.
+    windows.processEvent();
+    std::vector<cc::WindowEvent> closeEvents;
+    cc::events::WindowEvent::Listener listener;
+    listener.bind([&closeEvents](const cc::WindowEvent &event) {
+        if (event.type == cc::WindowEvent::Type::CLOSE || event.type == cc::WindowEvent::Type::QUIT) {
+            closeEvents.push_back(event);
+        }
+    });
+    window.closeWindow();
+    windows.processEvent();
+    require(closeEvents.size() == 1, "one production close request must deliver exactly one close event");
+    require(closeEvents.front().type == cc::WindowEvent::Type::CLOSE, "programmatic close emitted QUIT instead of the engine close lifecycle event");
+    require(closeEvents.front().windowId == window.getWindowId(), "close event identified the wrong engine window");
+
+    SDL_SetEventFilter([](void * /*userData*/, SDL_Event *event) -> int {
+        return event->type != SDL_WINDOWEVENT || event->window.event != SDL_WINDOWEVENT_CLOSE;
+    },
+                       nullptr);
+    window.closeWindow();
+    windows.processEvent();
+    SDL_SetEventFilter(nullptr, nullptr);
+    require(closeEvents.size() == 1, "rejected close request must not deliver an engine close event");
 }
 } // namespace
 
@@ -93,12 +123,20 @@ int main() {
     require(platform->init() == 0, "platform initialization failed; run with a working X11 DISPLAY");
     auto *windows = platform->getInterface<cc::ISystemWindowManager>();
     require(windows != nullptr, "missing window manager");
+    // SDL and engine window IDs belong to separate namespaces. Consume an SDL
+    // ID first so this regression cannot pass by assuming the IDs are equal.
+    auto *temporaryWindow = SDL_CreateWindow("SDL ID allocation", 0, 0, 8, 8, SDL_WINDOW_HIDDEN);
+    require(temporaryWindow != nullptr, "temporary SDL window creation failed");
+    SDL_DestroyWindow(temporaryWindow);
+    SDL_FlushEvents(SDL_FIRSTEVENT, SDL_LASTEVENT);
     cc::ISystemWindowInfo info;
     info.title = "Canvas lifecycle regression";
     info.width = 64;
     info.height = 64;
     info.flags = cc::ISystemWindow::CC_WINDOW_HIDDEN;
-    require(windows->createWindow(info) != nullptr, "hidden main window creation failed");
+    auto *mainWindow = windows->createWindow(info);
+    require(mainWindow != nullptr, "hidden main window creation failed");
+    require(SDL_GetWindowFromID(mainWindow->getWindowId()) == nullptr, "test did not separate SDL and engine window IDs");
 
     using Canvas = cc::CanvasRenderingContext2DDelegate;
     alignas(Canvas) std::array<unsigned char, sizeof(Canvas)> storage;
@@ -130,5 +168,7 @@ int main() {
         XSync(canvas._dis, False);
     }
     requireReleased();
+    verifyWindowClose(*windows, *mainWindow);
     std::puts("canvas lifecycle: construct-only, zero-sized, resized and font-owning contexts released all X11 resources");
+    std::puts("window lifecycle: programmatic close delivered one CLOSE event with the engine window ID");
 }
