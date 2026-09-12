@@ -30,7 +30,9 @@
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
+#include <fontconfig/fcfreetype.h>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 #define RGB(r, g, b)     (int)((int)r | (((int)g) << 8) | (((int)b) << 16))
@@ -132,12 +134,20 @@ void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float
     }
 
     Point offsetPoint = convertDrawPoint(Point{x, y}, text);
+    drawTextToPixmap(text, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]), _fillStyle);
+    readPixmapPixels();
+}
+
+void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style) {
     const auto channel = [](unsigned long color, unsigned int shift) {
         return static_cast<unsigned short>(((color >> shift) & 0xffU) * 257U);
     };
-    const XftColor color{0, {channel(_fillStyle, 0), channel(_fillStyle, 8), channel(_fillStyle, 16), channel(_fillStyle, 24)}};
-    XftDrawStringUtf8(_fontDraw, &color, _font, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]),
+    const XftColor color{0, {channel(style, 0), channel(style, 8), channel(style, 16), channel(style, 24)}};
+    XftDrawStringUtf8(_fontDraw, &color, _font, x, y,
                       reinterpret_cast<const FcChar8 *>(text.c_str()), static_cast<int>(text.length()));
+}
+
+void CanvasRenderingContext2DDelegate::readPixmapPixels() {
     XImage *image = XGetImage(_dis, _pixmap, 0, 0, _bufferWidth, _bufferHeight, AllPlanes, ZPixmap);
     CC_ASSERT_NOT_NULL(image);
     int width = image->width;
@@ -159,12 +169,6 @@ void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float
     XDestroyImage(image);
 }
 
-void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text, float /*x*/, float /*y*/, float /*maxWidth*/) const {
-    if (text.empty() || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
-        return;
-    }
-}
-
 CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::measureText(const ccstd::string &text) {
     if (text.empty() || !_font)
         return ccstd::array<float, 2>{0.0f, 0.0f};
@@ -183,13 +187,15 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
     _fontName = fontName;
     _fontSize = static_cast<int>(fontSize);
     releaseFont();
-    FcPattern *requested = FcPatternCreate();
-    CC_ASSERT_NOT_NULL(requested);
     const auto &registeredFonts = getFontFamilyNameMap();
     const auto registered = registeredFonts.find(fontName);
     const bool customFont = registered != registeredFonts.end();
+    FcPattern *requested = customFont
+                               ? FcFreeTypeQuery(reinterpret_cast<const FcChar8 *>(registered->second.c_str()), 0, nullptr, nullptr)
+                               : FcPatternCreate();
+    CC_ASSERT_NOT_NULL(requested);
     if (customFont) {
-        FcPatternAddString(requested, FC_FILE, reinterpret_cast<const FcChar8 *>(registered->second.c_str()));
+        FcPatternDel(requested, FC_PIXEL_SIZE);
     } else {
         const auto &family = fontName.empty() ? ccstd::string("sans-serif") : fontName;
         FcPatternAddString(requested, FC_FAMILY, reinterpret_cast<const FcChar8 *>(family.c_str()));
@@ -328,10 +334,23 @@ void CanvasRenderingContext2DDelegate::fillImageData(const Data & /* imageData *
     // XPutImage(dpy, w, gc, image, 0, 0, 50, 60, 40, 30);
 }
 
-void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string & /* text */,
-                                                  float /* x */,
-                                                  float /* y */,
+void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text,
+                                                  float x,
+                                                  float y,
                                                   float /* maxWidth */) {
+    if (text.empty() || !_font || !_fontDraw || _bufferWidth < 1.0F || _bufferHeight < 1.0F || _lineWidth <= 0.0F) {
+        return;
+    }
+    const Point origin = convertDrawPoint(Point{x, y}, text);
+    const int radius = static_cast<int>(std::ceil(_lineWidth / 2.0F));
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            if (dx * dx + dy * dy <= radius * radius) {
+                drawTextToPixmap(text, static_cast<int>(origin[0]) + dx, static_cast<int>(origin[1]) + dy, _strokeStyle);
+            }
+        }
+    }
+    readPixmapPixels();
 }
 
 void CanvasRenderingContext2DDelegate::rect(float /* x */,

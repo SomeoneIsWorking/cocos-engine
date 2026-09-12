@@ -12,6 +12,7 @@
 #include "platform/BasePlatform.h"
 #include "platform/interfaces/modules/ISystemWindow.h"
 #include "platform/interfaces/modules/ISystemWindowManager.h"
+#include "platform/interfaces/modules/canvas/CanvasRenderingContext2D.h"
 #include "platform/linux/modules/CanvasRenderingContext2DDelegate.h"
 
 #include <SDL2/SDL_events.h>
@@ -167,6 +168,16 @@ int main() {
     requireReleased();
 
     {
+        cc::CanvasRenderingContext2D context(128, 128);
+        context.setFont("60px monospace");
+        const float monoWidth = context.measureText("iiii").width;
+        context.setFont("60px sans-serif");
+        const float sansWidth = context.measureText("iiii").width;
+        require(monoWidth > sansWidth, "canvas font parser replaced the requested family with sans-serif");
+    }
+    requireReleased();
+
+    {
         Canvas canvas;
         canvas.recreateBuffer(0, 0);
     }
@@ -203,10 +214,25 @@ int main() {
             }
         }
         require(lastRow - firstRow >= 30, "60px text rendered at a small fallback size");
+        const auto inkCoverage = [](const unsigned char *image) {
+            int pixels = 0;
+            for (int index = 0; index < 128 * 128; ++index) {
+                pixels += image[index * 4 + 3] != 0;
+            }
+            return pixels;
+        };
+        const int fillCoverage = inkCoverage(pixels);
+        canvas.recreateBuffer(128, 128);
+        canvas.setStrokeStyle(0, 0, 0, 255);
+        canvas.setLineWidth(8);
+        canvas.strokeText("Play", 1, 1, 0);
+        require(inkCoverage(canvas.getDataRef().getBytes()) > fillCoverage,
+                "outlined text did not extend beyond the glyph fill");
+        canvas.fillText("Play", 1, 1, 0);
         XSync(canvas._dis, False);
     }
     requireReleased();
     verifyWindowClose(*windows, *mainWindow);
-    std::puts("canvas lifecycle: scalable 60px text and font-owning contexts released all X11 resources");
+    std::puts("canvas lifecycle: scalable outlined 60px text and font-owning contexts released all X11 resources");
     std::puts("window lifecycle: programmatic close delivered one CLOSE event with the engine window ID");
 }
