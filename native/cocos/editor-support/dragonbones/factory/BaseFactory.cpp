@@ -360,7 +360,9 @@ void BaseFactory::clear(bool disposeData) {
 Armature* BaseFactory::buildArmature(const std::string& armatureName, const std::string& dragonBonesName, const std::string& skinName, const std::string& textureAtlasName) const {
     BuildArmaturePackage dataPackage;
     if (!_fillBuildArmaturePackage(dataPackage, dragonBonesName, armatureName, skinName, textureAtlasName)) {
-        DRAGONBONES_ASSERT(false, "No armature data: " + armatureName + ", " + (!dragonBonesName.empty() ? dragonBonesName : ""));
+        CC_LOG_WARNING(
+            "DragonBones: non-existent armature; data=%s armature=%s",
+            dragonBonesName.empty() ? "<auto>" : dragonBonesName.c_str(), armatureName.c_str());
         return nullptr;
     }
 
