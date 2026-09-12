@@ -285,7 +285,7 @@ void CanvasRenderingContext2D::setFont(const ccstd::string &font) {
             std::regex fontRe(R"(([\w\s-]+|"[\w\s-]+"$))");
             ccstd::string tmp(results[4].str());
             if (std::regex_match(tmp, fontResults, fontRe)) {
-                //fontName = results[4].str();
+                fontName = tmp;
             }
         }
 

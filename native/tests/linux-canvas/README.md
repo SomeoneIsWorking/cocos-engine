@@ -8,8 +8,10 @@ and exercises the production canvas delegate without gameplay or audio.
 
 The test poisons placement storage before constructing an unused canvas, then
 checks zero-sized buffers, repeated buffer allocation and font replacement.
-It also measures and rasterizes 60 px text through the production delegate so
-the old X core-font fallback cannot pass. Linker wrappers count actual Xlib
+It distinguishes monospace from sans-serif through the production canvas font
+parser, then measures and rasterizes 60 px text and a visible outline through
+the delegate. The old fixed X core-font fallback, ignored family, or empty
+`strokeText` implementation cannot pass. Linker wrappers count actual Xlib
 and Xft resource acquisitions and releases; they do not replace allocation or
 rendering. Each phase requires exact balanced ownership, and missing display
 initialization is a failure.

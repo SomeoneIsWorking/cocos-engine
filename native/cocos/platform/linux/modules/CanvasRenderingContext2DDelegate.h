@@ -63,7 +63,6 @@ public:
     void clearRect(float /*x*/, float /*y*/, float w, float h) override;
     void fillRect(float x, float y, float w, float h) override;
     void fillText(const ccstd::string &text, float x, float y, float /*maxWidth*/) override;
-    void strokeText(const ccstd::string &text, float /*x*/, float /*y*/, float /*maxWidth*/) const;
     Size measureText(const ccstd::string &text) override;
     void updateFont(const ccstd::string &fontName, float fontSize, bool bold, bool italic, bool oblique, bool smallCaps) override;
     void setTextAlign(TextAlign align) override;
@@ -76,7 +75,7 @@ public:
     void setLineCap(const ccstd::string &lineCap) override;
     void setLineJoin(const ccstd::string &lineCap) override;
     void fillImageData(const Data &imageData, float imageWidth, float imageHeight, float offsetX, float offsetY) override;
-    void strokeText(const ccstd::string &text, float /*x*/, float /*y*/, float /*maxWidth*/) override;
+    void strokeText(const ccstd::string &text, float x, float y, float /*maxWidth*/) override;
     void rect(float x, float y, float w, float h) override;
     void updateData() override {}
     void setShadowBlur(float blur) override {}
@@ -87,6 +86,8 @@ public:
 private:
     static wchar_t *utf8ToUtf16(const ccstd::string &str, int *pRetLen = nullptr);
     void releaseFont();
+    void drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style);
+    void readPixmapPixels();
     int drawText(const ccstd::string &text, int x, int y);
     Size sizeWithText(const wchar_t *pszText, int nLen);
     void prepareBitmap(int nWidth, int nHeight);
