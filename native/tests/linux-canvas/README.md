@@ -8,9 +8,11 @@ and exercises the production canvas delegate without gameplay or audio.
 
 The test poisons placement storage before constructing an unused canvas, then
 checks zero-sized buffers, repeated buffer allocation and font replacement.
-Linker wrappers count actual Xlib resource acquisitions and releases; they do
-not replace allocation or rendering. Each phase requires exact balanced
-ownership, and missing display initialization is a failure.
+It also measures and rasterizes 60 px text through the production delegate so
+the old X core-font fallback cannot pass. Linker wrappers count actual Xlib
+and Xft resource acquisitions and releases; they do not replace allocation or
+rendering. Each phase requires exact balanced ownership, and missing display
+initialization is a failure.
 
 The same test calls the production window's `closeWindow()` and drains events
 through its window manager. It requires exactly one engine `CLOSE` event for

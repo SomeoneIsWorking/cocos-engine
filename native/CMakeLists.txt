@@ -3350,7 +3350,10 @@ if(QNX)
 elseif(LINUX)
     set(LINUX_GRAPHIC_LIBS "")
     if(NOT USE_SERVER_MODE)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft fontconfig)
         list(APPEND LINUX_GRAPHIC_LIBS X11)
+        list(APPEND LINUX_GRAPHIC_LIBS PkgConfig::XFT)
     endif()
     target_link_libraries(${ENGINE_NAME} PUBLIC
         ${LINUX_GRAPHIC_LIBS}
