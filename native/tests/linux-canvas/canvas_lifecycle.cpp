@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -16,12 +17,14 @@
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_video.h>
 #include <X11/X.h>
+#include <X11/Xft/Xft.h>
 #include <X11/Xlib.h>
 
 namespace {
 int graphicsContexts = 0;
 int pixmaps = 0;
 int fonts = 0;
+int fontDraws = 0;
 
 void require(bool condition, const char *message) {
     if (!condition) {
@@ -34,6 +37,7 @@ void requireReleased() {
     require(graphicsContexts == 0, "graphics context was leaked or freed without acquisition");
     require(pixmaps == 0, "pixmap was leaked or freed without acquisition");
     require(fonts == 0, "font was leaked or freed without acquisition");
+    require(fontDraws == 0, "font draw was leaked or freed without acquisition");
 }
 
 void verifyWindowClose(cc::ISystemWindowManager &windows, cc::ISystemWindow &window) {
@@ -68,14 +72,18 @@ decltype(XCreateGC) realCreateGraphicsContext asm("__real_XCreateGC");
 decltype(XFreeGC) realFreeGraphicsContext asm("__real_XFreeGC");
 decltype(XCreatePixmap) realCreatePixmap asm("__real_XCreatePixmap");
 decltype(XFreePixmap) realFreePixmap asm("__real_XFreePixmap");
-decltype(XLoadQueryFont) realLoadFont asm("__real_XLoadQueryFont");
-decltype(XFreeFont) realFreeFont asm("__real_XFreeFont");
+decltype(XftFontOpenPattern) realOpenFont asm("__real_XftFontOpenPattern");
+decltype(XftFontClose) realCloseFont asm("__real_XftFontClose");
+decltype(XftDrawCreateAlpha) realCreateFontDraw asm("__real_XftDrawCreateAlpha");
+decltype(XftDrawDestroy) realDestroyFontDraw asm("__real_XftDrawDestroy");
 decltype(XCreateGC) createGraphicsContext asm("__wrap_XCreateGC");
 decltype(XFreeGC) freeGraphicsContext asm("__wrap_XFreeGC");
 decltype(XCreatePixmap) createPixmap asm("__wrap_XCreatePixmap");
 decltype(XFreePixmap) freePixmap asm("__wrap_XFreePixmap");
-decltype(XLoadQueryFont) loadFont asm("__wrap_XLoadQueryFont");
-decltype(XFreeFont) freeFont asm("__wrap_XFreeFont");
+decltype(XftFontOpenPattern) openFont asm("__wrap_XftFontOpenPattern");
+decltype(XftFontClose) closeFont asm("__wrap_XftFontClose");
+decltype(XftDrawCreateAlpha) createFontDraw asm("__wrap_XftDrawCreateAlpha");
+decltype(XftDrawDestroy) destroyFontDraw asm("__wrap_XftDrawDestroy");
 
 GC createGraphicsContext(Display *display, Drawable drawable, std::uintptr_t mask, XGCValues *values) {
     GC context = realCreateGraphicsContext(display, drawable, mask, values);
@@ -101,16 +109,28 @@ int freePixmap(Display *display, Pixmap pixmap) {
     return realFreePixmap(display, pixmap);
 }
 
-XFontStruct *loadFont(Display *display, const char *name) {
-    auto *font = realLoadFont(display, name);
+XftFont *openFont(Display *display, FcPattern *pattern) {
+    auto *font = realOpenFont(display, pattern);
     fonts += font != nullptr;
     return font;
 }
 
-int freeFont(Display *display, XFontStruct *font) {
+void closeFont(Display *display, XftFont *font) {
     require(font != nullptr && fonts > 0, "freeing an unallocated font");
     --fonts;
-    return realFreeFont(display, font);
+    realCloseFont(display, font);
+}
+
+XftDraw *createFontDraw(Display *display, Pixmap pixmap, int depth) {
+    auto *draw = realCreateFontDraw(display, pixmap, depth);
+    fontDraws += draw != nullptr;
+    return draw;
+}
+
+void destroyFontDraw(XftDraw *draw) {
+    require(draw != nullptr && fontDraws > 0, "freeing an unallocated font draw");
+    --fontDraws;
+    realDestroyFontDraw(draw);
 }
 }
 
@@ -155,20 +175,38 @@ int main() {
     {
         Canvas canvas;
         canvas.recreateBuffer(16, 16);
-        require(graphicsContexts == 1 && pixmaps == 1, "initial buffer resources were not allocated");
+        require(graphicsContexts == 1 && pixmaps == 1 && fontDraws == 1, "initial buffer resources were not allocated");
         canvas.recreateBuffer(32, 32);
-        require(graphicsContexts == 1 && pixmaps == 1, "buffer resize did not replace its resources");
+        require(graphicsContexts == 1 && pixmaps == 1 && fontDraws == 1, "buffer resize did not replace its resources");
         canvas.updateFont("sans-serif", 12, false, false, false, false);
         require(fonts == 1, "font was not loaded");
         canvas.updateFont("sans-serif", 18, false, false, false, false);
         require(fonts == 1, "font update did not replace its resource");
+        canvas.updateFont("sans-serif", 60, false, false, false, false);
+        require(canvas.measureText("Play")[1] >= 50, "requested 60px font was replaced by a small fallback");
         canvas.recreateBuffer(0, 0);
-        require(graphicsContexts == 0 && pixmaps == 0, "zero-sized buffer retained resources");
-        canvas.recreateBuffer(8, 8);
+        require(graphicsContexts == 0 && pixmaps == 0 && fontDraws == 0, "zero-sized buffer retained resources");
+        canvas.recreateBuffer(128, 128);
+        canvas.setTextAlign(Canvas::TextAlign::LEFT);
+        canvas.setTextBaseline(Canvas::TextBaseline::TOP);
+        canvas.setFillStyle(255, 255, 255, 255);
+        canvas.fillText("Play", 1, 1, 0);
+        const auto *pixels = canvas.getDataRef().getBytes();
+        int firstRow = 128;
+        int lastRow = -1;
+        for (int row = 0; row < 128; ++row) {
+            for (int column = 0; column < 128; ++column) {
+                if (pixels[(row * 128 + column) * 4 + 3] != 0) {
+                    firstRow = std::min(firstRow, row);
+                    lastRow = row;
+                }
+            }
+        }
+        require(lastRow - firstRow >= 30, "60px text rendered at a small fallback size");
         XSync(canvas._dis, False);
     }
     requireReleased();
     verifyWindowClose(*windows, *mainWindow);
-    std::puts("canvas lifecycle: construct-only, zero-sized, resized and font-owning contexts released all X11 resources");
+    std::puts("canvas lifecycle: scalable 60px text and font-owning contexts released all X11 resources");
     std::puts("window lifecycle: programmatic close delivered one CLOSE event with the engine window ID");
 }

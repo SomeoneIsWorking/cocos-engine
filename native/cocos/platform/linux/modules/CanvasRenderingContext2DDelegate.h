@@ -34,6 +34,7 @@
 #include "math/Math.h"
 #include "platform/FileUtils.h"
 
+#include <X11/Xft/Xft.h>
 #include <X11/Xlib.h>
 #include <X11/Xos.h>
 #include <X11/Xutil.h>
@@ -98,7 +99,8 @@ public:
     int _screen{0};
     Drawable _win{0};
     Drawable _pixmap{0};
-    XFontStruct *_font{0};
+    XftFont *_font{nullptr};
+    XftDraw *_fontDraw{nullptr};
     GC _gc{nullptr};
 
 private:

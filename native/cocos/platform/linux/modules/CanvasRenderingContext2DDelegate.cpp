@@ -23,12 +23,14 @@
 ****************************************************************************/
 
 #include "platform/linux/modules/CanvasRenderingContext2DDelegate.h"
+#include "bindings/manual/jsb_platform.h"
 #include "platform/interfaces/modules/ISystemWindowManager.h"
 #include "platform/linux/LinuxPlatform.h"
 #include "platform/linux/modules/SystemWindow.h"
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
+#include <algorithm>
 
 namespace {
 #define RGB(r, g, b)     (int)((int)r | (((int)g) << 8) | (((int)b) << 16))
@@ -36,10 +38,6 @@ namespace {
 } // namespace
 
 namespace cc {
-// static const char gdefaultFontName[] = "-*-helvetica-medium-o-*-*-24-*-*-*-*-*-iso8859-*";
-// static const char gdefaultFontName[] = "lucidasanstypewriter-bold-24";
-static const char gdefaultFontName[] = "lucidasans-24";
-
 CanvasRenderingContext2DDelegate::CanvasRenderingContext2DDelegate() {
     auto *windowManager = BasePlatform::getPlatform()->getInterface<ISystemWindowManager>();
     CC_ASSERT_NOT_NULL(windowManager);
@@ -47,6 +45,7 @@ CanvasRenderingContext2DDelegate::CanvasRenderingContext2DDelegate() {
     CC_ASSERT_NOT_NULL(window);
     _dis = reinterpret_cast<Display *>(window->getDisplay());
     _win = reinterpret_cast<Drawable>(window->getWindowHandle());
+    _screen = DefaultScreen(_dis);
 }
 
 CanvasRenderingContext2DDelegate::~CanvasRenderingContext2DDelegate() {
@@ -73,6 +72,8 @@ void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
     // Screen *scr = DefaultScreenOfDisplay(_dis);
     _pixmap = XCreatePixmap(_dis, _win, w, h, 32);
     _gc = XCreateGC(_dis, _pixmap, 0, 0);
+    _fontDraw = XftDrawCreateAlpha(_dis, _pixmap, 32);
+    CC_ASSERT_NOT_NULL(_fontDraw);
 }
 
 void CanvasRenderingContext2DDelegate::beginPath() {
@@ -126,23 +127,36 @@ void CanvasRenderingContext2DDelegate::fillRect(float x, float y, float w, float
 }
 
 void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float x, float y, float /*maxWidth*/) {
-    if (text.empty() || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    if (text.empty() || !_font || !_fontDraw || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
         return;
     }
 
     Point offsetPoint = convertDrawPoint(Point{x, y}, text);
-    XSetForeground(_dis, _gc, 0xff000000 | _fillStyle);
-    XSetFont(_dis, _gc, _font->fid);
-    XDrawString(_dis, _pixmap, _gc, offsetPoint[0], offsetPoint[1], text.c_str(), (int)(text.length()));
+    const auto channel = [](unsigned long color, unsigned int shift) {
+        return static_cast<unsigned short>(((color >> shift) & 0xffU) * 257U);
+    };
+    const XftColor color{0, {channel(_fillStyle, 0), channel(_fillStyle, 8), channel(_fillStyle, 16), channel(_fillStyle, 24)}};
+    XftDrawStringUtf8(_fontDraw, &color, _font, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]),
+                      reinterpret_cast<const FcChar8 *>(text.c_str()), static_cast<int>(text.length()));
     XImage *image = XGetImage(_dis, _pixmap, 0, 0, _bufferWidth, _bufferHeight, AllPlanes, ZPixmap);
+    CC_ASSERT_NOT_NULL(image);
     int width = image->width;
     int height = image->height;
     unsigned char *data = _imageData.getBytes();
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; x++) {
-            *(((int *)data + (y * width) + x)) = static_cast<int>(XGetPixel(image, x, y));
+            const auto pixel = static_cast<uint32_t>(XGetPixel(image, x, y));
+            const uint32_t alpha = pixel >> 24U;
+            const auto straight = [alpha](uint32_t premultiplied) {
+                return alpha == 0U ? 0U : std::min(255U, (premultiplied * 255U + alpha / 2U) / alpha);
+            };
+            const uint32_t red = straight((pixel >> 16U) & 0xffU);
+            const uint32_t green = straight((pixel >> 8U) & 0xffU);
+            const uint32_t blue = straight(pixel & 0xffU);
+            reinterpret_cast<uint32_t *>(data)[y * width + x] = (alpha << 24U) | (blue << 16U) | (green << 8U) | red;
         }
     }
+    XDestroyImage(image);
 }
 
 void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text, float /*x*/, float /*y*/, float /*maxWidth*/) const {
@@ -152,15 +166,12 @@ void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text, flo
 }
 
 CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::measureText(const ccstd::string &text) {
-    if (text.empty())
+    if (text.empty() || !_font)
         return ccstd::array<float, 2>{0.0f, 0.0f};
-    int font_ascent = 0;
-    int font_descent = 0;
-    int direction = 0;
-    XCharStruct overall;
-    XQueryTextExtents(_dis, _font->fid, text.c_str(), text.length(), &direction, &font_ascent, &font_descent, &overall);
-    return ccstd::array<float, 2>{static_cast<float>(overall.width),
-                                  static_cast<float>(overall.ascent + overall.descent)};
+    XGlyphInfo extents{};
+    XftTextExtentsUtf8(_dis, _font, reinterpret_cast<const FcChar8 *>(text.c_str()),
+                       static_cast<int>(text.length()), &extents);
+    return ccstd::array<float, 2>{static_cast<float>(extents.xOff), static_cast<float>(_font->height)};
 }
 
 void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
@@ -169,50 +180,34 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
                                                   bool italic,
                                                   bool oblique,
                                                   bool /* smallCaps */) {
-    do {
-        _fontName = fontName;
-        _fontSize = static_cast<int>(fontSize);
-        /// TODO(bug):Remove default settings
-        ccstd::string fontName = "helvetica"; // default
-        char serv[1024] = {0};
-        ccstd::string slant = "";
-        if (italic) {
-            slant = "*I";
-        } else if (oblique) {
-            slant = "*o";
-        }
-        // *name-bold*Italic(Oblique)*size
-        snprintf(serv, sizeof(serv) - 1, "*%s%s%s*--%d*", fontName.c_str(),
-                 bold ? "*Bold" : "",
-                 slant.c_str(),
-                 _fontSize);
-        releaseFont();
-
-        _font = XLoadQueryFont(_dis, serv);
-        if (!_font) {
-            static int fontSizes[] = {8, 10, 12, 14, 18, 24};
-            int i = 0;
-            int size = sizeof(fontSizes) / sizeof(fontSizes[0]);
-            for (i = 0; i < size; ++i) {
-                if (_fontSize < fontSizes[i]) {
-                    break;
-                }
-            }
-            if (i == 0) {
-                _fontSize = fontSizes[0];
-            } else if (i > 1 && i < size) {
-                _fontSize = fontSizes[i - 1];
-            } else {
-                _fontSize = fontSizes[size - 1];
-            }
-            snprintf(serv, sizeof(serv) - 1, "*%s*%d*", "lucidasans", _fontSize);
-            _font = XLoadQueryFont(_dis, serv);
-            if (!_font) {
-                _font = XLoadQueryFont(_dis, "fixed");
-            }
-        }
-        CC_ASSERT_NOT_NULL(_font);
-    } while (false);
+    _fontName = fontName;
+    _fontSize = static_cast<int>(fontSize);
+    releaseFont();
+    FcPattern *requested = FcPatternCreate();
+    CC_ASSERT_NOT_NULL(requested);
+    const auto &registeredFonts = getFontFamilyNameMap();
+    const auto registered = registeredFonts.find(fontName);
+    const bool customFont = registered != registeredFonts.end();
+    if (customFont) {
+        FcPatternAddString(requested, FC_FILE, reinterpret_cast<const FcChar8 *>(registered->second.c_str()));
+    } else {
+        const auto &family = fontName.empty() ? ccstd::string("sans-serif") : fontName;
+        FcPatternAddString(requested, FC_FAMILY, reinterpret_cast<const FcChar8 *>(family.c_str()));
+    }
+    FcPatternAddDouble(requested, FC_PIXEL_SIZE, static_cast<double>(fontSize));
+    FcPatternAddInteger(requested, FC_WEIGHT, bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
+    FcPatternAddInteger(requested, FC_SLANT, italic ? FC_SLANT_ITALIC : (oblique ? FC_SLANT_OBLIQUE : FC_SLANT_ROMAN));
+    FcConfigSubstitute(nullptr, requested, FcMatchPattern);
+    XftDefaultSubstitute(_dis, _screen, requested);
+    FcPattern *resolved = requested;
+    if (!customFont) {
+        FcResult result = FcResultNoMatch;
+        resolved = XftFontMatch(_dis, _screen, requested, &result);
+        FcPatternDestroy(requested);
+    }
+    CC_ASSERT_NOT_NULL(resolved);
+    _font = XftFontOpenPattern(_dis, resolved);
+    CC_ASSERT_NOT_NULL(_font);
 }
 
 void CanvasRenderingContext2DDelegate::setTextAlign(TextAlign align) {
@@ -241,7 +236,7 @@ const cc::Data &CanvasRenderingContext2DDelegate::getDataRef() const {
 
 void CanvasRenderingContext2DDelegate::releaseFont() {
     if (_font) {
-        XFreeFont(_dis, _font);
+        XftFontClose(_dis, _font);
         _font = nullptr;
     }
 }
@@ -270,6 +265,10 @@ void CanvasRenderingContext2DDelegate::prepareBitmap(int nWidth, int nHeight) {
 }
 
 void CanvasRenderingContext2DDelegate::releaseBuffer() {
+    if (_fontDraw) {
+        XftDrawDestroy(_fontDraw);
+        _fontDraw = nullptr;
+    }
     if (_gc) {
         XFreeGC(_dis, _gc);
         _gc = nullptr;
@@ -285,12 +284,10 @@ void CanvasRenderingContext2DDelegate::fillTextureData() {
 }
 
 ccstd::array<float, 2> CanvasRenderingContext2DDelegate::convertDrawPoint(Point point, const ccstd::string &text) {
-    int font_ascent = 0;
-    int font_descent = 0;
-    int direction = 0;
-    XCharStruct overall;
-    XQueryTextExtents(_dis, _font->fid, text.c_str(), text.length(), &direction, &font_ascent, &font_descent, &overall);
-    int width = overall.width;
+    XGlyphInfo extents{};
+    XftTextExtentsUtf8(_dis, _font, reinterpret_cast<const FcChar8 *>(text.c_str()),
+                       static_cast<int>(text.length()), &extents);
+    const int width = extents.xOff;
     if (_textAlign == TextAlign::CENTER) {
         point[0] -= width / 2.0f;
     } else if (_textAlign == TextAlign::RIGHT) {
@@ -298,11 +295,11 @@ ccstd::array<float, 2> CanvasRenderingContext2DDelegate::convertDrawPoint(Point 
     }
 
     if (_textBaseLine == TextBaseline::TOP) {
-        point[1] += overall.ascent;
+        point[1] += _font->ascent;
     } else if (_textBaseLine == TextBaseline::MIDDLE) {
-        point[1] += (overall.descent - overall.ascent) / 2 - overall.descent;
+        point[1] += (_font->ascent - _font->descent) / 2;
     } else if (_textBaseLine == TextBaseline::BOTTOM) {
-        point[1] += -overall.descent;
+        point[1] -= _font->descent;
     } else if (_textBaseLine == TextBaseline::ALPHABETIC) {
         // point[1] -= overall.ascent;
         //  X11 The default way of drawing text
