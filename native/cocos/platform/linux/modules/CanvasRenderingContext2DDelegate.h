@@ -26,8 +26,10 @@
 
 #include "platform/interfaces/modules/canvas/ICanvasRenderingContext2D.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <regex>
+#include <vector>
 #include "base/csscolorparser.h"
 #include "base/std/container/array.h"
 #include "cocos/bindings/manual/jsb_platform.h"
@@ -84,8 +86,17 @@ public:
     void setShadowOffsetY(float offsetY) override {}
 
 private:
+    struct TextRun {
+        XftFont *font;
+        std::size_t begin;
+        std::size_t length;
+    };
+
     static wchar_t *utf8ToUtf16(const ccstd::string &str, int *pRetLen = nullptr);
     void releaseFont();
+    XftFont *resolveFont(FcChar32 codepoint);
+    std::vector<TextRun> resolveTextRuns(const ccstd::string &text);
+    int textAdvance(const ccstd::string &text);
     void drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style);
     void readPixmapPixels();
     int drawText(const ccstd::string &text, int x, int y);
@@ -101,6 +112,7 @@ public:
     Drawable _win{0};
     Drawable _pixmap{0};
     XftFont *_font{nullptr};
+    std::vector<XftFont *> _fallbackFonts;
     XftDraw *_fontDraw{nullptr};
     GC _gc{nullptr};
 
@@ -120,6 +132,8 @@ private:
 
     ccstd::string _fontName;
     int _fontSize{0};
+    int _fontWeight{FC_WEIGHT_REGULAR};
+    int _fontSlant{FC_SLANT_ROMAN};
     Size _textSize;
     TextAlign _textAlign{TextAlign::CENTER};
     TextBaseline _textBaseLine{TextBaseline::TOP};
