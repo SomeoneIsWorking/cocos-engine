@@ -29,10 +29,14 @@
 #include "platform/linux/modules/SystemWindow.h"
 
 #include <X11/X.h>
+#include <X11/Xft/Xft.h>
 #include <X11/Xlib.h>
 #include <fontconfig/fcfreetype.h>
+#include <fontconfig/fontconfig.h>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <vector>
 
 namespace {
 #define RGB(r, g, b)     (int)((int)r | (((int)g) << 8) | (((int)b) << 16))
@@ -143,8 +147,14 @@ void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &tex
         return static_cast<unsigned short>(((color >> shift) & 0xffU) * 257U);
     };
     const XftColor color{0, {channel(style, 0), channel(style, 8), channel(style, 16), channel(style, 24)}};
-    XftDrawStringUtf8(_fontDraw, &color, _font, x, y,
-                      reinterpret_cast<const FcChar8 *>(text.c_str()), static_cast<int>(text.length()));
+    for (const auto &run : resolveTextRuns(text)) {
+        const auto *bytes = reinterpret_cast<const FcChar8 *>(text.data() + run.begin);
+        const int length = static_cast<int>(run.length);
+        XftDrawStringUtf8(_fontDraw, &color, run.font, x, y, bytes, length);
+        XGlyphInfo extents{};
+        XftTextExtentsUtf8(_dis, run.font, bytes, length, &extents);
+        x += extents.xOff;
+    }
 }
 
 void CanvasRenderingContext2DDelegate::readPixmapPixels() {
@@ -172,10 +182,7 @@ void CanvasRenderingContext2DDelegate::readPixmapPixels() {
 CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::measureText(const ccstd::string &text) {
     if (text.empty() || !_font)
         return ccstd::array<float, 2>{0.0f, 0.0f};
-    XGlyphInfo extents{};
-    XftTextExtentsUtf8(_dis, _font, reinterpret_cast<const FcChar8 *>(text.c_str()),
-                       static_cast<int>(text.length()), &extents);
-    return ccstd::array<float, 2>{static_cast<float>(extents.xOff), static_cast<float>(_font->height)};
+    return ccstd::array<float, 2>{static_cast<float>(textAdvance(text)), static_cast<float>(_font->height)};
 }
 
 void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
@@ -186,6 +193,8 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
                                                   bool /* smallCaps */) {
     _fontName = fontName;
     _fontSize = static_cast<int>(fontSize);
+    _fontWeight = bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR;
+    _fontSlant = italic ? FC_SLANT_ITALIC : (oblique ? FC_SLANT_OBLIQUE : FC_SLANT_ROMAN);
     releaseFont();
     const auto &registeredFonts = getFontFamilyNameMap();
     const auto registered = registeredFonts.find(fontName);
@@ -201,8 +210,8 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
         FcPatternAddString(requested, FC_FAMILY, reinterpret_cast<const FcChar8 *>(family.c_str()));
     }
     FcPatternAddDouble(requested, FC_PIXEL_SIZE, static_cast<double>(fontSize));
-    FcPatternAddInteger(requested, FC_WEIGHT, bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
-    FcPatternAddInteger(requested, FC_SLANT, italic ? FC_SLANT_ITALIC : (oblique ? FC_SLANT_OBLIQUE : FC_SLANT_ROMAN));
+    FcPatternAddInteger(requested, FC_WEIGHT, _fontWeight);
+    FcPatternAddInteger(requested, FC_SLANT, _fontSlant);
     FcConfigSubstitute(nullptr, requested, FcMatchPattern);
     XftDefaultSubstitute(_dis, _screen, requested);
     FcPattern *resolved = requested;
@@ -241,10 +250,89 @@ const cc::Data &CanvasRenderingContext2DDelegate::getDataRef() const {
 }
 
 void CanvasRenderingContext2DDelegate::releaseFont() {
+    for (auto *font : _fallbackFonts) {
+        XftFontClose(_dis, font);
+    }
+    _fallbackFonts.clear();
     if (_font) {
         XftFontClose(_dis, _font);
         _font = nullptr;
     }
+}
+
+XftFont *CanvasRenderingContext2DDelegate::resolveFont(FcChar32 codepoint) {
+    if (XftCharIndex(_dis, _font, codepoint) != 0) {
+        return _font;
+    }
+    for (auto *font : _fallbackFonts) {
+        if (XftCharIndex(_dis, font, codepoint) != 0) {
+            return font;
+        }
+    }
+
+    FcCharSet *characters = FcCharSetCreate();
+    FcPattern *requested = FcPatternCreate();
+    CC_ASSERT_NOT_NULL(characters);
+    CC_ASSERT_NOT_NULL(requested);
+    FcCharSetAddChar(characters, codepoint);
+    FcPatternAddString(requested, FC_FAMILY, reinterpret_cast<const FcChar8 *>("sans-serif"));
+    FcPatternAddCharSet(requested, FC_CHARSET, characters);
+    FcPatternAddDouble(requested, FC_PIXEL_SIZE, static_cast<double>(_fontSize));
+    FcPatternAddInteger(requested, FC_WEIGHT, _fontWeight);
+    FcPatternAddInteger(requested, FC_SLANT, _fontSlant);
+    FcCharSetDestroy(characters);
+    FcConfigSubstitute(nullptr, requested, FcMatchPattern);
+    XftDefaultSubstitute(_dis, _screen, requested);
+    FcResult result = FcResultNoMatch;
+    FcPattern *matched = XftFontMatch(_dis, _screen, requested, &result);
+    FcPatternDestroy(requested);
+    if (matched == nullptr) {
+        return _font;
+    }
+    XftFont *fallback = XftFontOpenPattern(_dis, matched);
+    if (fallback == nullptr) {
+        return _font;
+    }
+    if (XftCharIndex(_dis, fallback, codepoint) == 0) {
+        XftFontClose(_dis, fallback);
+        return _font;
+    }
+    _fallbackFonts.push_back(fallback);
+    return fallback;
+}
+
+std::vector<CanvasRenderingContext2DDelegate::TextRun>
+CanvasRenderingContext2DDelegate::resolveTextRuns(const ccstd::string &text) {
+    std::vector<TextRun> runs;
+    for (std::size_t position = 0; position < text.length();) {
+        FcChar32 codepoint = 0;
+        const auto *bytes = reinterpret_cast<const FcChar8 *>(text.data() + position);
+        int length = FcUtf8ToUcs4(bytes, &codepoint, static_cast<int>(text.length() - position));
+        if (length <= 0) {
+            codepoint = static_cast<unsigned char>(text[position]);
+            length = 1;
+        }
+        XftFont *font = resolveFont(codepoint);
+        if (!runs.empty() && runs.back().font == font) {
+            runs.back().length += static_cast<std::size_t>(length);
+        } else {
+            runs.push_back(TextRun{font, position, static_cast<std::size_t>(length)});
+        }
+        position += static_cast<std::size_t>(length);
+    }
+    return runs;
+}
+
+int CanvasRenderingContext2DDelegate::textAdvance(const ccstd::string &text) {
+    int advance = 0;
+    for (const auto &run : resolveTextRuns(text)) {
+        XGlyphInfo extents{};
+        XftTextExtentsUtf8(_dis, run.font,
+                           reinterpret_cast<const FcChar8 *>(text.data() + run.begin),
+                           static_cast<int>(run.length), &extents);
+        advance += extents.xOff;
+    }
+    return advance;
 }
 
 // x, y offset value
@@ -290,10 +378,7 @@ void CanvasRenderingContext2DDelegate::fillTextureData() {
 }
 
 ccstd::array<float, 2> CanvasRenderingContext2DDelegate::convertDrawPoint(Point point, const ccstd::string &text) {
-    XGlyphInfo extents{};
-    XftTextExtentsUtf8(_dis, _font, reinterpret_cast<const FcChar8 *>(text.c_str()),
-                       static_cast<int>(text.length()), &extents);
-    const int width = extents.xOff;
+    const int width = textAdvance(text);
     if (_textAlign == TextAlign::CENTER) {
         point[0] -= width / 2.0f;
     } else if (_textAlign == TextAlign::RIGHT) {

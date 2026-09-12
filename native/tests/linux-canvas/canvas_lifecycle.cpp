@@ -8,6 +8,8 @@
 
 #include "application/ApplicationManager.h"
 #include "application/BaseGame.h"
+#include "base/std/container/unordered_map.h"
+#include "bindings/manual/jsb_platform.h"
 #include "engine/EngineEvents.h"
 #include "platform/BasePlatform.h"
 #include "platform/interfaces/modules/ISystemWindow.h"
@@ -39,6 +41,14 @@ void requireReleased() {
     require(pixmaps == 0, "pixmap was leaked or freed without acquisition");
     require(fonts == 0, "font was leaked or freed without acquisition");
     require(fontDraws == 0, "font draw was leaked or freed without acquisition");
+}
+
+int inkCoverage(const unsigned char *image, int width, int height) {
+    int pixels = 0;
+    for (int index = 0; index < width * height; ++index) {
+        pixels += image[index * 4 + 3] != 0;
+    }
+    return pixels;
 }
 
 void verifyWindowClose(cc::ISystemWindowManager &windows, cc::ISystemWindow &window) {
@@ -178,6 +188,47 @@ int main() {
     requireReleased();
 
     {
+        // Subset from editor/assets/default_fonts/builtin-freetype/OpenSans-Regular.ttf
+        // with --unicodes=U+0021-007E --notdef-outline so a missing space paints a box.
+        auto &registeredFonts = const_cast<ccstd::unordered_map<ccstd::string, ccstd::string> &>(getFontFamilyNameMap());
+        require(registeredFonts.emplace("NoSpaceTest", CC_TEST_NO_SPACE_FONT).second,
+                "test font family was already registered");
+        Canvas canvas;
+        canvas.recreateBuffer(128, 128);
+        canvas.updateFont("NoSpaceTest", 60, false, false, false, false);
+        require(XftCharIndex(canvas._dis, canvas._font, ' ') == 0,
+                "test font unexpectedly contains a space glyph");
+        require(canvas.measureText(" ")[0] > 0, "missing-space fallback lost word advance");
+        canvas.setTextAlign(Canvas::TextAlign::LEFT);
+        canvas.setTextBaseline(Canvas::TextBaseline::TOP);
+        canvas.setFillStyle(255, 255, 255, 255);
+        canvas.fillText(" ", 1, 1, 0);
+        require(inkCoverage(canvas.getDataRef().getBytes(), 128, 128) == 0,
+                "missing space glyph painted a replacement box");
+        canvas.recreateBuffer(128, 128);
+        canvas.updateFont("NoSpaceTest", 30, false, false, false, false);
+        canvas.setTextAlign(Canvas::TextAlign::CENTER);
+        canvas.fillText("A A", 64, 1, 0);
+        const auto *pixels = canvas.getDataRef().getBytes();
+        int firstColumn = 128;
+        int lastColumn = -1;
+        for (int row = 0; row < 128; ++row) {
+            for (int column = 0; column < 128; ++column) {
+                const int pixelIndex = (row * 128) + column;
+                const int alphaIndex = (pixelIndex * 4) + 3;
+                if (pixels[alphaIndex] != 0) {
+                    firstColumn = std::min(firstColumn, column);
+                    lastColumn = column;
+                }
+            }
+        }
+        require(firstColumn <= lastColumn && std::abs(firstColumn + lastColumn - 128) <= 8,
+                "missing-space fallback shifted centered text");
+        registeredFonts.erase("NoSpaceTest");
+    }
+    requireReleased();
+
+    {
         Canvas canvas;
         canvas.recreateBuffer(0, 0);
     }
@@ -214,19 +265,12 @@ int main() {
             }
         }
         require(lastRow - firstRow >= 30, "60px text rendered at a small fallback size");
-        const auto inkCoverage = [](const unsigned char *image) {
-            int pixels = 0;
-            for (int index = 0; index < 128 * 128; ++index) {
-                pixels += image[index * 4 + 3] != 0;
-            }
-            return pixels;
-        };
-        const int fillCoverage = inkCoverage(pixels);
+        const int fillCoverage = inkCoverage(pixels, 128, 128);
         canvas.recreateBuffer(128, 128);
         canvas.setStrokeStyle(0, 0, 0, 255);
         canvas.setLineWidth(8);
         canvas.strokeText("Play", 1, 1, 0);
-        require(inkCoverage(canvas.getDataRef().getBytes()) > fillCoverage,
+        require(inkCoverage(canvas.getDataRef().getBytes(), 128, 128) > fillCoverage,
                 "outlined text did not extend beyond the glyph fill");
         canvas.fillText("Play", 1, 1, 0);
         XSync(canvas._dis, False);
