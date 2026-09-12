@@ -845,7 +845,22 @@ Object.defineProperty(nodeProto, 'position', {
     configurable: true,
     enumerable: true,
     get(): Readonly<Vec3> {
-        return this._lpos;
+        if (!this._positionProxy) {
+            const node = this;
+            // JSB keeps a shadow Vec3; mutating the returned position must also
+            // update the native transform used for rendering and world queries.
+            this._positionProxy = new Proxy(this._lpos, {
+                set(target, property, value) {
+                    const changed = Reflect.get(target, property) !== value;
+                    Reflect.set(target, property, value);
+                    if (changed && (property === 'x' || property === 'y' || property === 'z')) {
+                        node.setPosition(target);
+                    }
+                    return true;
+                },
+            });
+        }
+        return this._positionProxy;
     },
     set(v: Readonly<Vec3>) {
         this.setPosition(v as Vec3);
