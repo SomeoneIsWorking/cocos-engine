@@ -2941,8 +2941,9 @@ void cmdFuncGLES3CopyBuffersToTexture(GLES3Device *device, const uint8_t *const 
 
 void cmdFuncGLES3CopyTextureToBuffers(GLES3Device *device, GLES3GPUTextureView *gpuTextureView, uint8_t *const *buffers, const BufferTextureCopy *regions, uint32_t count) {
     const auto *gpuTexture = gpuTextureView->gpuTexture;
-    auto glFormat = gpuTexture->glFormat;
-    auto glType = gpuTexture->glType;
+    // Swapchain textures bypass cmdFuncGLES3CreateTexture, which normally fills these fields.
+    auto glFormat = gpuTexture->swapchain ? mapGLFormat(gpuTexture->format) : gpuTexture->glFormat;
+    auto glType = gpuTexture->swapchain ? formatToGLType(gpuTexture->format) : gpuTexture->glType;
 
     for (uint32_t i = 0; i < count; ++i) {
         auto region = regions[i];
