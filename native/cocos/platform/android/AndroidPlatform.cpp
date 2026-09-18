@@ -852,9 +852,22 @@ int32_t AndroidPlatform::loop() {
         int events;
         struct android_poll_source *source;
 
+        // ALooper_pollAll is unavailable from NDK 27 onwards because it can
+        // swallow an ALooper_wake, which is how this loop is told that work is
+        // waiting. ALooper_pollOnce reports one event at a time, so draining
+        // the queue means three changes to what pollAll did in one call:
+        // keep going after a callback dispatch (ALOOPER_POLL_CALLBACK) instead
+        // of reading it as "nothing left"; stop only on ALOOPER_POLL_TIMEOUT or
+        // an error; and clear `source` first, because pollOnce leaves outData
+        // untouched unless it returns an identifier and would otherwise
+        // reprocess the previous iteration's source.
+        //
         // suspend thread while _loopTimeOut set to -1
-        while ((ALooper_pollAll(_loopTimeOut, nullptr, &events,
-                                reinterpret_cast<void **>(&source))) >= 0) {
+        int pollResult = 0;
+        do {
+            source = nullptr;
+            pollResult = ALooper_pollOnce(_loopTimeOut, nullptr, &events,
+                                          reinterpret_cast<void **>(&source));
             // process event
             if (source != nullptr) {
                 source->process(_app, source);
@@ -864,7 +877,7 @@ int32_t AndroidPlatform::loop() {
             if (_app->destroyRequested) {
                 break;
             }
-        }
+        } while (pollResult >= 0 || pollResult == ALOOPER_POLL_CALLBACK);
         // Exit the game loop when the Activity is destroyed
         if (_app->destroyRequested) {
             break;
