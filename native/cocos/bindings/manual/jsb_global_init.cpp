@@ -26,6 +26,7 @@
 #include "base/Macros.h"
 // clang-format: off
 #include "base/std/container/string.h"
+#include "base/std/container/vector.h"
 #include "uv.h"
 // clang-format on
 
@@ -49,7 +50,11 @@ using namespace cc; //NOLINT
 se::Object *__jsbObj = nullptr; //NOLINT
 se::Object *__glObj = nullptr;  //NOLINT
 
-static std::basic_string<unsigned char> xxteaKey;
+// A byte buffer, not text. std::basic_string<unsigned char> only ever compiled
+// because libc++ supplied a primary std::char_traits template; that was
+// deprecated in C++20 and removed in LLVM 18, so the NDK 27+ sysroot rejects it
+// outright. Nothing here used a string operation on it.
+static ccstd::vector<unsigned char> xxteaKey;
 
 void jsb_set_xxtea_key(const ccstd::string &key) { //NOLINT
     xxteaKey.assign(key.begin(), key.end());
