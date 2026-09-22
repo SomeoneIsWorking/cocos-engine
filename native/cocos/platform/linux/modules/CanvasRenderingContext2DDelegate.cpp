@@ -39,8 +39,19 @@
 #include <vector>
 
 namespace {
-#define RGB(r, g, b)     (int)((int)r | (((int)g) << 8) | (((int)b) << 16))
-#define RGBA(r, g, b, a) (int)((int)r | (((int)g) << 8) | (((int)b) << 16) | (((int)a) << 24))
+// The canvas draws into a depth-32 pixmap, whose pixels are ARGB32: alpha in
+// bits 24-31, then red, green and blue. CSS hands the components in the
+// opposite order, and packing them straight through made every filled or
+// stroked shape swap red and blue -- while Xft text, which is given real
+// colour components rather than a pixel value, stayed correct. That is the
+// asymmetry to preserve: one packing for the X pixel, components for Xft.
+#define RGB(r, g, b)     (int)((((int)r) << 16) | (((int)g) << 8) | (int)b)
+#define RGBA(r, g, b, a) (int)((((int)a) << 24) | RGB(r, g, b))
+
+constexpr unsigned int PIXEL_BLUE_SHIFT = 0U;
+constexpr unsigned int PIXEL_GREEN_SHIFT = 8U;
+constexpr unsigned int PIXEL_RED_SHIFT = 16U;
+constexpr unsigned int PIXEL_ALPHA_SHIFT = 24U;
 } // namespace
 
 namespace cc {
@@ -146,7 +157,7 @@ void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &tex
     const auto channel = [](unsigned long color, unsigned int shift) {
         return static_cast<unsigned short>(((color >> shift) & 0xffU) * 257U);
     };
-    const XftColor color{0, {channel(style, 0), channel(style, 8), channel(style, 16), channel(style, 24)}};
+    const XftColor color{0, {channel(style, PIXEL_RED_SHIFT), channel(style, PIXEL_GREEN_SHIFT), channel(style, PIXEL_BLUE_SHIFT), channel(style, PIXEL_ALPHA_SHIFT)}};
     for (const auto &run : resolveTextRuns(text)) {
         const auto *bytes = reinterpret_cast<const FcChar8 *>(text.data() + run.begin);
         const int length = static_cast<int>(run.length);
