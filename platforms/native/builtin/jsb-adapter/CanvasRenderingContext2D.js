@@ -66,12 +66,12 @@ class CanvasRenderingContext2D {
     setTransform (a, b, c, d, e, f) { this._nativeObj.setTransform(a, b, c, d, e, f); }
     stroke () {
         this._canvas._dataInner = null;
-        this._nativeObj.stroke();
+        this._nativeObj.stroke(this._attris);
     }
     measureText (text) { return this._nativeObj.measureText(text, this._attris); }
     fill () {
         this._canvas._dataInner = null;
-        this._nativeObj.fill();
+        this._nativeObj.fill(this._attris);
     }
     _fillImageData (data, width, height, offsetX, offsetY) {
         this._canvas._dataInner = null;
