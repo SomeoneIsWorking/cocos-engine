@@ -497,6 +497,40 @@ static bool js_engine_CanvasRenderingContext2D_fillRect(se::State &s) { // NOLIN
 }
 SE_BIND_FUNC(js_engine_CanvasRenderingContext2D_fillRect) // NOLINT(readability-identifier-naming)
 
+// fill and stroke consume the context's style as fillRect does: the adapter
+// keeps fillStyle, strokeStyle and lineWidth in script and hands them over with
+// the draw call, so a path drawn without them would take whatever the last
+// text or rectangle left behind.
+static bool js_engine_CanvasRenderingContext2D_fill(se::State &s) { // NOLINT(readability-identifier-naming)
+    auto *cobj = static_cast<cc::ICanvasRenderingContext2D *>(s.nativeThisObject());
+    SE_PRECONDITION2(cobj, false, "Invalid Native Object");
+    const auto &args = s.args();
+    if (args.size() == 1) {
+        SE_PRECONDITION2(args[0].isObject(), false, "no attributes set.");
+        setCanvasRenderingContext2DProps(cobj, args[0]);
+        cobj->fill();
+        return true;
+    }
+    SE_REPORT_ERROR("wrong number of arguments: %d, was expecting %d", (int)args.size(), 1);
+    return false;
+}
+SE_BIND_FUNC(js_engine_CanvasRenderingContext2D_fill) // NOLINT(readability-identifier-naming)
+
+static bool js_engine_CanvasRenderingContext2D_stroke(se::State &s) { // NOLINT(readability-identifier-naming)
+    auto *cobj = static_cast<cc::ICanvasRenderingContext2D *>(s.nativeThisObject());
+    SE_PRECONDITION2(cobj, false, "Invalid Native Object");
+    const auto &args = s.args();
+    if (args.size() == 1) {
+        SE_PRECONDITION2(args[0].isObject(), false, "no attributes set.");
+        setCanvasRenderingContext2DProps(cobj, args[0]);
+        cobj->stroke();
+        return true;
+    }
+    SE_REPORT_ERROR("wrong number of arguments: %d, was expecting %d", (int)args.size(), 1);
+    return false;
+}
+SE_BIND_FUNC(js_engine_CanvasRenderingContext2D_stroke) // NOLINT(readability-identifier-naming)
+
 static bool js_engine_CanvasRenderingContext2D_fillText(se::State &s) { // NOLINT(readability-identifier-naming)
     auto *cobj = static_cast<cc::ICanvasRenderingContext2D *>(s.nativeThisObject());
     SE_PRECONDITION2(cobj, false, "Invalid Native Object");
@@ -607,6 +641,8 @@ static bool register_canvas_context2d(se::Object * /*obj*/) { // NOLINT(readabil
     __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("fillText", _SE(js_engine_CanvasRenderingContext2D_fillText));
     __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("strokeText", _SE(js_engine_CanvasRenderingContext2D_strokeText));
     __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("fillRect", _SE(js_engine_CanvasRenderingContext2D_fillRect));
+    __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("fill", _SE(js_engine_CanvasRenderingContext2D_fill));
+    __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("stroke", _SE(js_engine_CanvasRenderingContext2D_stroke));
     __jsb_cc_ICanvasRenderingContext2D_proto->defineFunction("measureText", _SE(js_engine_CanvasRenderingContext2D_measureText));
 
     se::ScriptEngine::getInstance()->clearException();
