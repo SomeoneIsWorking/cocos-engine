@@ -38,6 +38,7 @@
 
 #include <X11/Xft/Xft.h>
 #include <X11/Xlib.h>
+#include <X11/extensions/Xrender.h>
 #include <X11/Xos.h>
 #include <X11/Xutil.h>
 
@@ -79,7 +80,7 @@ public:
     void fillImageData(const Data &imageData, float imageWidth, float imageHeight, float offsetX, float offsetY) override;
     void strokeText(const ccstd::string &text, float x, float y, float /*maxWidth*/) override;
     void rect(float x, float y, float w, float h) override;
-    void updateData() override {}
+    void updateData() override;
     void setShadowBlur(float blur) override {}
     void setShadowColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) override {}
     void setShadowOffsetX(float offsetX) override {}
@@ -98,6 +99,8 @@ private:
     std::vector<TextRun> resolveTextRuns(const ccstd::string &text);
     int textAdvance(const ccstd::string &text);
     void drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style);
+    void compositePath(unsigned long style);
+    void strokePath(unsigned long style);
     void readPixmapPixels();
     int drawText(const ccstd::string &text, int x, int y);
     Size sizeWithText(const wchar_t *pszText, int nLen);
@@ -117,8 +120,9 @@ public:
     GC _gc{nullptr};
 
 private:
-    int32_t _x{0};
-    int32_t _y{0};
+    // The current path, one polyline per subpath, as the web canvas keeps it
+    // between beginPath and the fill or stroke that consumes it.
+    std::vector<std::vector<XPointDouble>> _path;
     int32_t _lineCap{0};
     int32_t _lineJoin{0};
 

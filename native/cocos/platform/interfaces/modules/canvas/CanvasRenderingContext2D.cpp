@@ -201,7 +201,7 @@ void CanvasRenderingContext2D::fill() {
     // SE_LOGE("%s isn't implemented!\n", __FUNCTION__);
 #if CC_PLATFORM == CC_PLATFORM_WINDOWS
 
-#elif CC_PLATFORM == CC_PLATFORM_ANDROID
+#elif CC_PLATFORM == CC_PLATFORM_ANDROID || CC_PLATFORM == CC_PLATFORM_LINUX
     _delegate->fill();
 #endif
 }
@@ -210,7 +210,7 @@ void CanvasRenderingContext2D::rect(float x, float y, float w, float h) {
     recreateBufferIfNeeded();
 #if CC_PLATFORM == CC_PLATFORM_WINDOWS
     // SE_LOGE("%s isn't implemented!\n", __FUNCTION__);
-#elif CC_PLATFORM == CC_PLATFORM_ANDROID
+#elif CC_PLATFORM == CC_PLATFORM_ANDROID || CC_PLATFORM == CC_PLATFORM_LINUX
     // SE_LOGD("CanvasRenderingContext2D::rect: %p, %f, %f, %f, %f\n", this, x, y, width, height);
     _delegate->rect(x, y, w, h);
 #endif
