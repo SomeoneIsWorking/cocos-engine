@@ -94,26 +94,107 @@ void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
 }
 
 void CanvasRenderingContext2DDelegate::beginPath() {
-    // called: set_lineWidth() -> beginPath() -> moveTo() -> lineTo() -> stroke(), when draw line
-    XSetLineAttributes(_dis, _gc, static_cast<int>(_lineWidth), LineSolid, _lineCap, _lineJoin);
-    XSetForeground(_dis, _gc, RGB(255, 255, 255));
+    _path.clear();
 }
 
 void CanvasRenderingContext2DDelegate::closePath() {
+    if (!_path.empty() && _path.back().size() > 1) {
+        const XPointDouble start = _path.back().front();
+        _path.back().push_back(start);
+        _path.push_back({start});
+    }
 }
 
 void CanvasRenderingContext2DDelegate::moveTo(float x, float y) {
-    // MoveToEx(_DC, static_cast<int>(x), static_cast<int>(-(y - _bufferHeight - _fontSize)), nullptr);
-    _x = x;
-    _y = y;
+    _path.push_back({XPointDouble{x, y}});
 }
 
 void CanvasRenderingContext2DDelegate::lineTo(float x, float y) {
-    // LineTo(_DC,  static_cast<int>(x),  static_cast<int>(-(y - _bufferHeight - _fontSize)));
-    XDrawLine(_dis, _pixmap, _gc, _x, _y, x, y);
+    if (_path.empty()) {
+        _path.push_back({});
+    }
+    _path.back().push_back(XPointDouble{x, y});
+}
+
+void CanvasRenderingContext2DDelegate::rect(float x, float y, float w, float h) {
+    _path.push_back({XPointDouble{x, y}, XPointDouble{x + w, y}, XPointDouble{x + w, y + h}, XPointDouble{x, y + h}, XPointDouble{x, y}});
+    _path.push_back({XPointDouble{x, y}});
+}
+
+void CanvasRenderingContext2DDelegate::fill() {
+    compositePath(_fillStyle);
 }
 
 void CanvasRenderingContext2DDelegate::stroke() {
+    strokePath(_strokeStyle);
+}
+
+// Fills the current path source-over, as the web canvas does, antialiased.
+// Each subpath's coverage is added into one alpha mask before the colour is
+// composited through it, so subpaths that overlap are covered once -- the
+// nonzero rule for subpaths wound the same way. A subpath wound against
+// another to cut a hole is not distinguished from one that adds to it.
+void CanvasRenderingContext2DDelegate::compositePath(unsigned long style) {
+    if (_pixmap == None || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+        return;
+    }
+    const auto width = static_cast<unsigned int>(_bufferWidth);
+    const auto height = static_cast<unsigned int>(_bufferHeight);
+    XRenderPictFormat *maskFormat = XRenderFindStandardFormat(_dis, PictStandardA8);
+    XRenderPictFormat *targetFormat = XRenderFindStandardFormat(_dis, PictStandardARGB32);
+    CC_ASSERT_NOT_NULL(maskFormat);
+    CC_ASSERT_NOT_NULL(targetFormat);
+    const Pixmap maskPixmap = XCreatePixmap(_dis, _pixmap, width, height, 8);
+    const Picture mask = XRenderCreatePicture(_dis, maskPixmap, maskFormat, 0, nullptr);
+    const XRenderColor clear{0, 0, 0, 0};
+    XRenderFillRectangle(_dis, PictOpSrc, mask, &clear, 0, 0, width, height);
+    const XRenderColor opaque{0xffff, 0xffff, 0xffff, 0xffff};
+    const Picture white = XRenderCreateSolidFill(_dis, &opaque);
+    for (auto &subpath : _path) {
+        if (subpath.size() > 2) {
+            XRenderCompositeDoublePoly(_dis, PictOpAdd, white, mask, maskFormat, 0, 0, 0, 0,
+                                       subpath.data(), static_cast<int>(subpath.size()), WindingRule);
+        }
+    }
+    const auto channel = [style](unsigned int shift) {
+        const unsigned long alpha = (style >> PIXEL_ALPHA_SHIFT) & 0xffU;
+        const unsigned long component = shift == PIXEL_ALPHA_SHIFT ? 0xffU : (style >> shift) & 0xffU;
+        return static_cast<unsigned short>((component * alpha + 127U) / 255U * 257U);
+    };
+    const XRenderColor colour{channel(PIXEL_RED_SHIFT), channel(PIXEL_GREEN_SHIFT), channel(PIXEL_BLUE_SHIFT), channel(PIXEL_ALPHA_SHIFT)};
+    const Picture source = XRenderCreateSolidFill(_dis, &colour);
+    const Picture target = XRenderCreatePicture(_dis, _pixmap, targetFormat, 0, nullptr);
+    XRenderComposite(_dis, PictOpOver, source, mask, target, 0, 0, 0, 0, 0, 0, width, height);
+    XRenderFreePicture(_dis, target);
+    XRenderFreePicture(_dis, source);
+    XRenderFreePicture(_dis, white);
+    XRenderFreePicture(_dis, mask);
+    XFreePixmap(_dis, maskPixmap);
+}
+
+// Strokes the current path's subpaths at the line width. Core X lines write
+// the pixel rather than blend it, so the colour is premultiplied to be the
+// ARGB32 pixel the pixmap holds.
+void CanvasRenderingContext2DDelegate::strokePath(unsigned long style) {
+    if (_pixmap == None || _gc == nullptr) {
+        return;
+    }
+    const unsigned long alpha = (style >> PIXEL_ALPHA_SHIFT) & 0xffU;
+    const auto premultiplied = [style, alpha](unsigned int shift) {
+        return (((style >> shift) & 0xffU) * alpha + 127U) / 255U << shift;
+    };
+    XSetForeground(_dis, _gc, (alpha << PIXEL_ALPHA_SHIFT) | premultiplied(PIXEL_RED_SHIFT) | premultiplied(PIXEL_GREEN_SHIFT) | premultiplied(PIXEL_BLUE_SHIFT));
+    XSetLineAttributes(_dis, _gc, static_cast<unsigned int>(std::lround(_lineWidth)), LineSolid, CapButt, JoinRound);
+    for (const auto &subpath : _path) {
+        std::vector<XPoint> points;
+        points.reserve(subpath.size());
+        for (const auto &point : subpath) {
+            points.push_back(XPoint{static_cast<short>(std::lround(point.x)), static_cast<short>(std::lround(point.y))});
+        }
+        if (points.size() > 1) {
+            XDrawLines(_dis, _pixmap, _gc, points.data(), static_cast<int>(points.size()), CoordModeOrigin);
+        }
+    }
 }
 
 void CanvasRenderingContext2DDelegate::saveContext() {
@@ -150,7 +231,6 @@ void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float
 
     Point offsetPoint = convertDrawPoint(Point{x, y}, text);
     drawTextToPixmap(text, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]), _fillStyle);
-    readPixmapPixels();
 }
 
 void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style) {
@@ -165,6 +245,16 @@ void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &tex
         XGlyphInfo extents{};
         XftTextExtentsUtf8(_dis, run.font, bytes, length, &extents);
         x += extents.xOff;
+    }
+}
+
+// The JSB canvas asks for its pixels (fetchData) only when script reads them,
+// and every draw call invalidates the copy it read, so the pixmap is read back
+// once per read rather than after each draw -- and fillRect and fill, which
+// never read back themselves, reach script like text does.
+void CanvasRenderingContext2DDelegate::updateData() {
+    if (_pixmap != None && !_imageData.isNull()) {
+        readPixmapPixels();
     }
 }
 
@@ -410,9 +500,6 @@ ccstd::array<float, 2> CanvasRenderingContext2DDelegate::convertDrawPoint(Point 
     return point;
 }
 
-void CanvasRenderingContext2DDelegate::fill() {
-}
-
 void CanvasRenderingContext2DDelegate::setLineCap(const ccstd::string &lineCap) {
     _lineCap = LineSolid;
 }
@@ -446,13 +533,6 @@ void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text,
             }
         }
     }
-    readPixmapPixels();
-}
-
-void CanvasRenderingContext2DDelegate::rect(float /* x */,
-                                            float /* y */,
-                                            float /* w */,
-                                            float /* h */) {
 }
 
 } // namespace cc
