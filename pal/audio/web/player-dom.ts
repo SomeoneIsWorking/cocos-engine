@@ -77,6 +77,15 @@ export class OneShotAudioDOM {
         }
     }
 
+    get pitch (): number {
+        return this._domAudio.playbackRate;
+    }
+    set pitch (v) {
+        // A one-shot's pitch rises with its speed, as a Web Audio source's playbackRate.
+        this._domAudio.preservesPitch = false;
+        this._domAudio.playbackRate = v;
+    }
+
     private constructor (nativeAudio: HTMLAudioElement, volume: number) {
         this._domAudio = nativeAudio;
         nativeAudio.volume =  volume;

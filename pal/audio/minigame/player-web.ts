@@ -41,6 +41,13 @@ export class OneShotAudioWeb {
     private _onPlayCb?: () => void;
     private _url: string;
 
+    get pitch (): number {
+        return this._bufferSourceNode.playbackRate.value;
+    }
+    set pitch (v) {
+        this._bufferSourceNode.playbackRate.value = v;
+    }
+
     get onPlay (): (() => void) | undefined {
         return this._onPlayCb;
     }

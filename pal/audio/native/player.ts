@@ -86,6 +86,7 @@ export class OneShotAudio {
     private _id: number = INVALID_AUDIO_ID;
     private _url: string;
     private _volume: number;
+    private _pitch = 1;
     private _cacheRetained = true;
     private _onPlayCb?: () => void;
     get onPlay (): (() => void) | undefined {
@@ -101,6 +102,13 @@ export class OneShotAudio {
     }
     set onEnd (cb) {
         this._onEndCb = cb;
+    }
+
+    get pitch (): number {
+        return this._pitch;
+    }
+    set pitch (v) {
+        this._pitch = v;
     }
 
     private constructor (url: string, volume: number)  {
@@ -124,6 +132,7 @@ export class OneShotAudio {
             this._releaseCache();
             return;
         }
+        jsb.AudioEngine.setPitch(this._id, this._pitch);
         jsb.AudioEngine.setFinishCallback(this._id, () => {
             this._id = INVALID_AUDIO_ID;
             this._releaseCache();

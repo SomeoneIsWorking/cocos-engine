@@ -14,6 +14,11 @@ declare module 'pal/audio' {
         private constructor (nativeAudio: unknown, volume: number);
 
         /**
+         * The rate the audio plays at, raising its speed and pitch together (0.5 to 2.0); set it before `play()`.
+         */
+        public pitch: number;
+
+        /**
          * Play the audio.
          */
         public play (): void;

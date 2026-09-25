@@ -120,6 +120,19 @@ void AudioPlayer::destroy() {
     // CC_LOG_DEBUG("AudioPlayer::destroy end, id=%u", _id);
 }
 
+void AudioPlayer::setPitch(float pitch) {
+    // play2d reads the pitch under this lock, so a source it is starting cannot miss the change.
+    std::lock_guard<std::mutex> lock(_play2dMutex);
+    _pitch = pitch;
+    if (_ready) {
+        alSourcef(_alSource, AL_PITCH, pitch);
+        auto error = alGetError();
+        if (error != AL_NO_ERROR) {
+            ALOGE("%s: player id = %u, error = %x", __FUNCTION__, _id, error);
+        }
+    }
+}
+
 void AudioPlayer::setCache(AudioCache *cache) {
     _audioCache = cache;
 }
@@ -140,7 +153,7 @@ bool AudioPlayer::play2d() {
 
         alSourcei(_alSource, AL_BUFFER, 0);
         CHECK_AL_ERROR_DEBUG();
-        alSourcef(_alSource, AL_PITCH, 1.0F);
+        alSourcef(_alSource, AL_PITCH, _pitch);
         CHECK_AL_ERROR_DEBUG();
         alSourcef(_alSource, AL_GAIN, _volume);
         CHECK_AL_ERROR_DEBUG();

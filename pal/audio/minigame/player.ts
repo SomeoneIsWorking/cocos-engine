@@ -47,6 +47,16 @@ export class OneShotAudio {
         this._audio.onEnd = v;
     }
 
+    /**
+     * The rate the audio plays at, raising its speed and pitch together; set before play.
+     */
+    get pitch (): number {
+        return this._audio.pitch;
+    }
+    set pitch (v) {
+        this._audio.pitch = v;
+    }
+
     private constructor (audio: AbstractOneShotAudio) {
         this._audio = audio;
     }

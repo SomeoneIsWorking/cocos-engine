@@ -27,6 +27,8 @@
 
 #include "audio/android/AudioMixerController.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include "audio/android/AudioMixer.h"
 #include "audio/android/OpenSLHelper.h"
 #include "audio/android/Track.h"
@@ -136,6 +138,19 @@ void AudioMixerController::initTrack(Track *track, ccstd::vector<Track *> &track
     }
 }
 
+void AudioMixerController::updateTrackPitch(Track *track) {
+    std::lock_guard<std::mutex> lk(track->_pitchDirtyMutex);
+    if (!track->_isPitchDirty) {
+        return;
+    }
+    // The track's PCM is decoded at the device rate. Declaring it recorded at the device rate
+    // times its pitch makes the mixer resample it to play that much faster and higher.
+    const auto trackSampleRate = static_cast<uint32_t>(std::lround(static_cast<float>(_sampleRate) * track->_pitch));
+    _mixer->setParameter(track->getName(), AudioMixer::RESAMPLE, AudioMixer::SAMPLE_RATE,
+                         reinterpret_cast<void *>(static_cast<uintptr_t>(trackSampleRate)));
+    track->_isPitchDirty = false;
+}
+
 void AudioMixerController::mixOneFrame() {
     _isMixingFrame = true;
     _activeTracksMutex.lock();
@@ -196,6 +211,7 @@ void AudioMixerController::mixOneFrame() {
 
                 track->setVolumeDirty(false);
             }
+            updateTrackPitch(track);
         } else if (state == Track::State::RESUMED) {
             initTrack(track, tracksToRemove);
 

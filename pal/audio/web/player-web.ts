@@ -165,6 +165,13 @@ export class OneShotAudioWeb {
     private _currentTimer = 0;
     private _url: string;
 
+    get pitch (): number {
+        return this._bufferSourceNode.playbackRate.value;
+    }
+    set pitch (v) {
+        this._bufferSourceNode.playbackRate.value = v;
+    }
+
     get onPlay (): (() => void) | undefined {
         return this._onPlayCb;
     }
@@ -200,7 +207,7 @@ export class OneShotAudioWeb {
             this._currentTimer = window.setTimeout(() => {
                 audioBufferManager.tryReleasingCache(this._url);
                 this.onEnd?.();
-            }, this._duration * 1000);
+            }, this._duration * 1000 / this.pitch);
         }).catch((e) => { debug.warn('play error', e); });
     }
 

@@ -49,6 +49,13 @@ export class OneShotAudioMinigame {
         this._onEndCb = cb;
     }
 
+    get pitch (): number {
+        return this._innerAudioContext.playbackRate;
+    }
+    set pitch (v) {
+        this._innerAudioContext.playbackRate = v;
+    }
+
     private constructor (nativeAudio: InnerAudioContext, volume: number) {
         this._innerAudioContext = nativeAudio;
         nativeAudio.volume = volume;

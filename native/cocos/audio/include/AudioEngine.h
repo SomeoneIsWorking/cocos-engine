@@ -164,6 +164,24 @@ public:
      */
     static float getVolume(int audioID);
 
+    /**
+     * Sets the pitch of an audio instance: the rate it plays at, which raises its speed
+     * and its pitch together, as OpenAL's AL_PITCH and a Web Audio source's playbackRate.
+     * An instance that has not started yet starts at it.
+     *
+     * @param audioID An audioID returned by the play2d function.
+     * @param pitch Pitch value (range from 0.5 to 2.0; 1.0 plays the audio at its own).
+     */
+    static void setPitch(int audioID, float pitch);
+
+    /**
+     * Gets the pitch value of an audio instance.
+     *
+     * @param audioID An audioID returned by the play2d function.
+     * @return Pitch value (range from 0.5 to 2.0).
+     */
+    static float getPitch(int audioID);
+
     /** 
      * Pause an audio instance.
      *
@@ -354,6 +372,7 @@ protected:
         ProfileHelper *profileHelper;
 
         float volume;
+        float pitch;
         bool loop;
         float duration;
         AudioState state;
@@ -389,6 +408,10 @@ protected:
     static bool sIsEnabled;
 
 private:
+    // The pitch range every backend plays: Android's OpenSL ES playback rate is 500 to 2000 per mille.
+    static constexpr float MIN_PITCH = 0.5F;
+    static constexpr float MAX_PITCH = 2.0F;
+
     static float sVolumeFactor;
     static events::EnterBackground::Listener sOnPauseListenerID;
     static events::EnterForeground::Listener sOnResumeListenerID;

@@ -24,6 +24,7 @@
 ****************************************************************************/
 
 #include "audio/include/AudioEngine.h"
+#include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -82,6 +83,7 @@ AudioEngine::AudioInfo::AudioInfo()
 : filePath(nullptr),
   profileHelper(nullptr),
   volume(1.0F),
+  pitch(1.0F),
   loop(false),
   duration(TIME_UNKNOWN),
   state(AudioState::INITIALIZING) {
@@ -275,6 +277,18 @@ void AudioEngine::setVolume(int audioID, float volume) {
             sAudioEngineImpl->setVolume(audioID, volume * sVolumeFactor);
             it->second.volume = volume;
         }
+    }
+}
+
+void AudioEngine::setPitch(int audioID, float pitch) {
+    auto it = sAudioIDInfoMap.find(audioID);
+    if (it == sAudioIDInfoMap.end()) {
+        return;
+    }
+    pitch = std::clamp(pitch, MIN_PITCH, MAX_PITCH);
+    if (it->second.pitch != pitch) {
+        sAudioEngineImpl->setPitch(audioID, pitch);
+        it->second.pitch = pitch;
     }
 }
 
@@ -505,6 +519,16 @@ float AudioEngine::getVolume(int audioID) {
 
     CC_LOG_INFO("AudioEngine::getVolume-->The audio instance %d is non-existent", audioID);
     return 0.0F;
+}
+
+float AudioEngine::getPitch(int audioID) {
+    auto tmpIterator = sAudioIDInfoMap.find(audioID);
+    if (tmpIterator != sAudioIDInfoMap.end()) {
+        return tmpIterator->second.pitch;
+    }
+
+    CC_LOG_INFO("AudioEngine::getPitch-->The audio instance %d is non-existent", audioID);
+    return 1.0F;
 }
 
 AudioEngine::AudioState AudioEngine::getState(int audioID) {

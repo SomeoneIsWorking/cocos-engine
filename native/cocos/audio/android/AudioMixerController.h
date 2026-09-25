@@ -64,6 +64,7 @@ public:
 private:
     void destroy();
     void initTrack(Track *track, ccstd::vector<Track *> &tracksToRemove);
+    void updateTrackPitch(Track *track);
 
 private:
     int _bufferSizeInFrames;

@@ -99,6 +99,10 @@ void PcmAudioPlayer::setVolume(float volume) {
     _track->setVolume(volume);
 }
 
+void PcmAudioPlayer::setPitch(float pitch) {
+    _track->setPitch(pitch);
+}
+
 float PcmAudioPlayer::getVolume() const {
     return _track->getVolume();
 }

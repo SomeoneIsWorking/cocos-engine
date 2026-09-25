@@ -65,6 +65,14 @@ void Track::setVolume(float volume) {
     }
 }
 
+void Track::setPitch(float pitch) {
+    std::lock_guard<std::mutex> lk(_pitchDirtyMutex);
+    if (fabs(_pitch - pitch) > 0.00001) {
+        _pitch = pitch;
+        _isPitchDirty = true;
+    }
+}
+
 float Track::getVolume() const {
     return _volume;
 }
