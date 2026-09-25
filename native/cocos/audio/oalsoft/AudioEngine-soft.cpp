@@ -304,6 +304,13 @@ void AudioEngineImpl::setVolume(int audioID, float volume) {
     }
 }
 
+void AudioEngineImpl::setPitch(int audioID, float pitch) {
+    if (!checkAudioIdValid(audioID)) {
+        return;
+    }
+    _audioPlayers[audioID]->setPitch(pitch);
+}
+
 void AudioEngineImpl::setLoop(int audioID, bool loop) {
     if (!checkAudioIdValid(audioID)) {
         return;

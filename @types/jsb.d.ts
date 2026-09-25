@@ -184,10 +184,12 @@ declare namespace jsb {
         export function getState(id: number): any;
         export function getDuration(id: number): number;
         export function getVolume(id: number): number;
+        export function getPitch(id: number): number;
         export function isLoop(id: number): boolean;
         export function getCurrentTime(id: number): number;
 
         export function setVolume(id: number, val: number);
+        export function setPitch(id: number, val: number);
         export function setLoop(id: number, val: boolean);
         export function setCurrentTime(id: number, val: number);
 

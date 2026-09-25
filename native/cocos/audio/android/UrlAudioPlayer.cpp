@@ -195,6 +195,17 @@ void UrlAudioPlayer::setVolume(float volume) {
     }
 }
 
+void UrlAudioPlayer::setPitch(float pitch) {
+    if (_playbackRateItf == nullptr) {
+        ALOGW("UrlAudioPlayer (%p) has no playback rate interface, could not set pitch %f!", this, pitch);
+        return;
+    }
+    // Android's player changes pitch with its rate (SL_RATEPROP_NOPITCHCORAUDIO), 500 to 2000 per mille.
+    const auto permille = static_cast<SLpermille>(std::lround(pitch * 1000.0F));
+    SLresult r = (*_playbackRateItf)->SetRate(_playbackRateItf, permille);
+    SL_RETURN_IF_FAILED(r, "UrlAudioPlayer::setPitch %d failed", static_cast<int>(permille));
+}
+
 float UrlAudioPlayer::getVolume() const {
     return _volume;
 }
@@ -285,10 +296,10 @@ bool UrlAudioPlayer::prepare(const ccstd::string &url, SLuint32 locatorType, std
     SLDataSink audioSnk = {&locOutmix, nullptr};
 
     // create audio player
-    const SLInterfaceID ids[3] = {SL_IID_SEEK, SL_IID_PREFETCHSTATUS, SL_IID_VOLUME};
-    const SLboolean req[3] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
+    const SLInterfaceID ids[4] = {SL_IID_SEEK, SL_IID_PREFETCHSTATUS, SL_IID_VOLUME, SL_IID_PLAYBACKRATE};
+    const SLboolean req[4] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_FALSE};
 
-    SLresult result = (*_engineItf)->CreateAudioPlayer(_engineItf, &_playObj, &audioSrc, &audioSnk, 3, ids, req);
+    SLresult result = (*_engineItf)->CreateAudioPlayer(_engineItf, &_playObj, &audioSrc, &audioSnk, 4, ids, req);
     SL_RETURN_VAL_IF_FAILED(result, false, "CreateAudioPlayer failed");
 
     // realize the player
@@ -306,6 +317,11 @@ bool UrlAudioPlayer::prepare(const ccstd::string &url, SLuint32 locatorType, std
     // get the volume interface
     result = (*_playObj)->GetInterface(_playObj, SL_IID_VOLUME, &_volumeItf);
     SL_RETURN_VAL_IF_FAILED(result, false, "GetInterface SL_IID_VOLUME failed");
+
+    // Optional: a player without it plays every clip at its own rate.
+    if ((*_playObj)->GetInterface(_playObj, SL_IID_PLAYBACKRATE, &_playbackRateItf) != SL_RESULT_SUCCESS) {
+        _playbackRateItf = nullptr;
+    }
 
     result = (*_playItf)->RegisterCallback(_playItf,
                                            SLUrlAudioPlayerCallbackProxy::playEventCallback, this);

@@ -422,8 +422,9 @@ export class AudioSource extends Component {
      * 以指定音量倍数播放一个音频一次。最终播放的音量为 `audioSource.volume * volumeScale`。 <br>
      * @param clip The audio clip to be played.
      * @param volumeScale volume scaling factor wrt. current value.
+     * @param pitch The rate the clip plays at, raising its speed and pitch together (0.5 to 2.0).
      */
-    public playOneShot (clip: AudioClip, volumeScale = 1): void {
+    public playOneShot (clip: AudioClip, volumeScale = 1, pitch = 1): void {
         if (!clip._nativeAsset) {
             // eslint-disable-next-line no-console
             console.error('Invalid audio clip');
@@ -438,6 +439,7 @@ export class AudioSource extends Component {
             oneShotAudio.onEnd = (): void => {
                 audioManager.removePlaying(oneShotAudio);
             };
+            oneShotAudio.pitch = pitch;
             oneShotAudio.play();
             audioManager.addPlaying(oneShotAudio);
         }).catch((e): void => {

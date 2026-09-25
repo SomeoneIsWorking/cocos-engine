@@ -57,6 +57,8 @@ public:
     bool setTime(float time);
     float getTime() { return _currTime; }
     bool setLoop(bool loop);
+    // Takes effect at once on a started source; one not started yet starts at it.
+    void setPitch(float pitch);
 
 protected:
     void setCache(AudioCache *cache);
@@ -66,6 +68,7 @@ protected:
     AudioCache *_audioCache;
 
     float _volume;
+    float _pitch{1.0F};
     bool _loop;
     std::function<void(int, const ccstd::string &)> _finishCallbak;
 

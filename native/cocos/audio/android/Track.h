@@ -61,6 +61,9 @@ public:
     void setVolume(float volume);
     float getVolume() const;
 
+    // Mixed at the next frame: AudioMixerController resamples the track to play it at this rate.
+    void setPitch(float pitch);
+
     void setAudioFocus(bool isFocus);
 
     bool setPosition(float pos);
@@ -91,6 +94,9 @@ private:
     float _volume;
     bool _isVolumeDirty;
     std::mutex _volumeDirtyMutex;
+    float _pitch{1.0F};
+    bool _isPitchDirty{false};
+    std::mutex _pitchDirtyMutex;
     bool _isLoop;
     bool _isInitialized;
     bool _isAudioFocus;

@@ -219,6 +219,8 @@ declare class InnerAudioContext {
     loop: boolean;
     obeyMuteSwitch: boolean;
     volume: number;
+    // The rate the audio plays at, 0.5 to 2.0.
+    playbackRate: number;
     duration: number;
     currentTime: number;
     paused: boolean;

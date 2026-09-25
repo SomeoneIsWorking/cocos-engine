@@ -8,6 +8,7 @@ const nativeAudio = {
     play2d: jest.fn(() => 7),
     getDuration: jest.fn(() => 2.5),
     setFinishCallback: jest.fn(),
+    setPitch: jest.fn(),
     stop: jest.fn(),
     uncache: jest.fn(),
 };
@@ -91,6 +92,14 @@ test('one-shot cache is released on stop and finish', async () => {
     failed.play();
     expect(nativeAudio.uncache).toHaveBeenCalledTimes(3);
     expect(nativeAudio.uncache).toHaveBeenLastCalledWith('failed-play.mp3');
+});
+
+test('one-shot plays its native audio at its pitch', async () => {
+    const oneShot = await AudioPlayer.loadOneShotAudio('pitched.mp3', 0.5);
+    oneShot.pitch = 1.25;
+    oneShot.play();
+    expect(nativeAudio.setPitch).toHaveBeenCalledWith(7, 1.25);
+    oneShot.stop();
 });
 
 test.each([
