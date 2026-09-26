@@ -3298,9 +3298,13 @@ if(APPLE)
         "-lsqlite3"
         "-framework Security"
         "-framework SystemConfiguration"
-        "$(inherited)"
         ${CC_EXTERNAL_LIBS}
     )
+    # $(inherited) is an Xcode build-setting reference. Any other generator
+    # hands it to the linker verbatim, and Ninja refuses the unescaped `$`.
+    if(CMAKE_GENERATOR STREQUAL "Xcode")
+        target_link_libraries(${ENGINE_NAME} PUBLIC "$(inherited)")
+    endif()
     set_target_properties(${ENGINE_NAME} PROPERTIES
         XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH "YES"
         OSX_ARCHITECTURES "arm64;x86_64"
