@@ -3355,7 +3355,11 @@ elseif(LINUX)
     set(LINUX_GRAPHIC_LIBS "")
     if(NOT USE_SERVER_MODE)
         find_package(PkgConfig REQUIRED)
-        pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft xrender fontconfig)
+        # freetype is named because the Linux canvas rasterises its own glyphs: the delegate
+        # asks FreeType for coverage directly rather than letting Xft composite into a
+        # drawable, which on a server with no 32-bit visual is a drawable with nowhere to put
+        # the alpha. Depending on xft to drag freetype in is not a declaration of that.
+        pkg_check_modules(XFT REQUIRED IMPORTED_TARGET xft xrender fontconfig freetype2)
         list(APPEND LINUX_GRAPHIC_LIBS X11)
         list(APPEND LINUX_GRAPHIC_LIBS PkgConfig::XFT)
     endif()
