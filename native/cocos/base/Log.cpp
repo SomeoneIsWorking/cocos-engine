@@ -229,7 +229,13 @@ void Log::logMessage(LogType type, LogLevel level, const char *formats, ...) {
     }
     OH_LOG_Print(LOG_APP, ohosLoglevel, LOG_DOMAIN, "HMG_LOG", "%{public}s", buff);
 #else
+    // A piped stdout is block-buffered, so an engine diagnostic written shortly before the
+    // process is killed rather than exited is still sitting in the buffer and is lost. That
+    // makes the log empty exactly when it was wanted, which is worse than not logging: a
+    // measurement built on it then reports a clean negative for something that did happen.
+    // Flushing each line costs a write per diagnostic, which is what a diagnostic is for.
     fputs(buff, stdout);
+    fflush(stdout);
 #endif
 #if CC_REMOTE_LOG
     logRemote(buff);
