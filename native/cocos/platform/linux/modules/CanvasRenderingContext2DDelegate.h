@@ -63,7 +63,7 @@ public:
     void stroke() override;
     void saveContext() override;
     void restoreContext() override;
-    void clearRect(float /*x*/, float /*y*/, float w, float h) override;
+    void clearRect(float x, float y, float w, float h) override;
     void fillRect(float x, float y, float w, float h) override;
     void fillText(const ccstd::string &text, float x, float y, float /*maxWidth*/) override;
     Size measureText(const ccstd::string &text) override;

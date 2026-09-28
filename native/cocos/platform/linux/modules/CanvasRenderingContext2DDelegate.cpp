@@ -89,6 +89,14 @@ void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
     // Screen *scr = DefaultScreenOfDisplay(_dis);
     _pixmap = XCreatePixmap(_dis, _win, w, h, 32);
     _gc = XCreateGC(_dis, _pixmap, 0, 0);
+    // A new pixmap holds whatever the server had in that memory. The pixels handed to
+    // script come from the pixmap and not from the zeroed shadow buffer above, so without
+    // this a freshly created canvas reads back as the previous occupant's pixels: a label
+    // redrawn with new text showed both, because the text was drawn onto the old label's
+    // bitmap instead of onto a cleared one. A zero foreground is a fully transparent
+    // ARGB32 pixel, which is what a new canvas is.
+    XSetForeground(_dis, _gc, 0);
+    XFillRectangle(_dis, _pixmap, _gc, 0, 0, static_cast<unsigned int>(w), static_cast<unsigned int>(h));
     _fontDraw = XftDrawCreateAlpha(_dis, _pixmap, 32);
     CC_ASSERT_NOT_NULL(_fontDraw);
 }
@@ -204,15 +212,31 @@ void CanvasRenderingContext2DDelegate::restoreContext() {
 }
 
 void CanvasRenderingContext2DDelegate::clearRect(float x, float y, float w, float h) {
-    if (_bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    if (_pixmap == None || _gc == nullptr || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
         return;
     }
-
-    if (_imageData.isNull()) {
+    // The rectangle, inside the canvas the script already has. This used to recreate the
+    // buffer at the rectangle's size, which is not what the web's clearRect does: it left
+    // the canvas resized to the last thing that was cleared, out of band with the size the
+    // context itself tracks, and a partial clear destroyed everything outside the
+    // rectangle. A zero foreground is a fully transparent ARGB32 pixel, which is what
+    // "cleared" means for a canvas that text is drawn onto.
+    const int left = static_cast<int>(std::lround(x));
+    const int top = static_cast<int>(std::lround(y));
+    const int right = static_cast<int>(std::lround(x + w));
+    const int bottom = static_cast<int>(std::lround(y + h));
+    // A rect may leave the canvas entirely, and a negative origin is not an error.
+    const int clippedLeft = std::max(0, left);
+    const int clippedTop = std::max(0, top);
+    const int clippedRight = std::min(static_cast<int>(_bufferWidth), right);
+    const int clippedBottom = std::min(static_cast<int>(_bufferHeight), bottom);
+    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) {
         return;
     }
-
-    recreateBuffer(w, h);
+    XSetForeground(_dis, _gc, 0);
+    XFillRectangle(_dis, _pixmap, _gc, clippedLeft, clippedTop,
+                   static_cast<unsigned int>(clippedRight - clippedLeft),
+                   static_cast<unsigned int>(clippedBottom - clippedTop));
 }
 
 void CanvasRenderingContext2DDelegate::fillRect(float x, float y, float w, float h) {
