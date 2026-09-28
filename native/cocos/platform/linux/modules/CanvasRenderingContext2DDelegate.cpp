@@ -33,9 +33,13 @@
 #include <X11/Xlib.h>
 #include <fontconfig/fcfreetype.h>
 #include <fontconfig/fontconfig.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -78,27 +82,107 @@ void CanvasRenderingContext2DDelegate::recreateBuffer(float w, float h) {
     if (_bufferWidth < 1.0F || _bufferHeight < 1.0F) {
         return;
     }
-    auto textureSize = static_cast<int>(_bufferWidth * _bufferHeight * 4);
+    const auto pixels = static_cast<std::size_t>(_bufferWidth) * static_cast<std::size_t>(_bufferHeight);
+    const auto textureSize = static_cast<int>(pixels * 4);
     auto *data = static_cast<int8_t *>(malloc(sizeof(int8_t) * textureSize));
     memset(data, 0x00, textureSize);
     _imageData.fastSet((uint8_t *)data, textureSize);
 
-    if (!_win) {
+    // The canvas is this buffer, and it is a new canvas: all zero, which in straight RGBA8 is
+    // a fully transparent pixel.
+    _coverageBytes = pixels;
+    _coverage = static_cast<unsigned char *>(calloc(pixels, 1));
+    CC_ASSERT_NOT_NULL(_coverage);
+    // And that is the whole of a buffer's X resources: none. This delegate used to ask for a
+    // depth-32 pixmap and draw straight into it, which is right on a server that has a
+    // 32-bit visual and silently wrong on one that does not. An ordinary X server offers
+    // depth 24 with masks 0xff0000, 0xff00, 0xff and *no alpha at all*, and refuses depth 32
+    // outright, so the drawable that came back had red_mask, green_mask and blue_mask all
+    // zero. There was then nowhere to put an alpha: a "cleared" canvas could not be cleared,
+    // clearRect's zero foreground painted opaque black, and every canvas this delegate
+    // produced on Linux had a non-transparent background -- which for a label meant its
+    // texture tinted everything behind it and showed a second, dimmer copy of its own text.
+    //
+    // The pixels live in this process, glyph coverage comes from FreeType, and the colour is
+    // composited here where the arithmetic is exact. A canvas that owns no server resource
+    // also cannot leak one.
+}
+
+void CanvasRenderingContext2DDelegate::clearCoverage() {
+    if (_coverage != nullptr) {
+        memset(_coverage, 0, _coverageBytes);
+    }
+}
+
+// The mask Xft just drew, read back as coverage. Runs are laid out at their own advances and
+// do not overlap within one string, so a straight copy is the whole of it.
+// The coverage byte out of a mask image. An A8 drawable carries its value in the low
+// byte, not in the alpha bits where a 32-bit drawable would put it, and getting this
+// wrong reads every glyph as fully covered -- a slab rather than a letter.
+static unsigned char coverageByte(const XImage *image, uint32_t pixel) {
+    return image->depth <= 8 ? static_cast<unsigned char>(pixel & 0xffU)
+                             : static_cast<unsigned char>((pixel >> 24U) & 0xffU);
+}
+
+void CanvasRenderingContext2DDelegate::sourceOver(unsigned char *pixel, unsigned char red, unsigned char green,
+                                                  unsigned char blue, unsigned char alpha) const {
+    if (alpha == 0) {
         return;
     }
-    // Screen *scr = DefaultScreenOfDisplay(_dis);
-    _pixmap = XCreatePixmap(_dis, _win, w, h, 32);
-    _gc = XCreateGC(_dis, _pixmap, 0, 0);
-    // A new pixmap holds whatever the server had in that memory. The pixels handed to
-    // script come from the pixmap and not from the zeroed shadow buffer above, so without
-    // this a freshly created canvas reads back as the previous occupant's pixels: a label
-    // redrawn with new text showed both, because the text was drawn onto the old label's
-    // bitmap instead of onto a cleared one. A zero foreground is a fully transparent
-    // ARGB32 pixel, which is what a new canvas is.
-    XSetForeground(_dis, _gc, 0);
-    XFillRectangle(_dis, _pixmap, _gc, 0, 0, static_cast<unsigned int>(w), static_cast<unsigned int>(h));
-    _fontDraw = XftDrawCreateAlpha(_dis, _pixmap, 32);
-    CC_ASSERT_NOT_NULL(_fontDraw);
+    const unsigned int destinationAlpha = pixel[3];
+    if (destinationAlpha == 0) {
+        // Exact, and the case this whole change exists for: onto a cleared canvas the result
+        // is the source, not an approximation of it.
+        pixel[0] = red;
+        pixel[1] = green;
+        pixel[2] = blue;
+        pixel[3] = alpha;
+        return;
+    }
+    const unsigned int inverse = 255U - alpha;
+    const unsigned int outAlpha = alpha + (destinationAlpha * inverse + 127U) / 255U;
+    const unsigned int source[3] = {red, green, blue};
+    for (unsigned int channel = 0; channel < 3; ++channel) {
+        const unsigned int numerator = source[channel] * alpha + (pixel[channel] * destinationAlpha * inverse + 127U) / 255U;
+        pixel[channel] = static_cast<unsigned char>(std::min(255U, (numerator + outAlpha / 2U) / outAlpha));
+    }
+    pixel[3] = static_cast<unsigned char>(outAlpha);
+}
+
+void CanvasRenderingContext2DDelegate::compositeCoverage(unsigned long style) {
+    if (_coverage == nullptr || _imageData.isNull()) {
+        return;
+    }
+    const auto red = static_cast<unsigned char>((style >> PIXEL_RED_SHIFT) & 0xffU);
+    const auto green = static_cast<unsigned char>((style >> PIXEL_GREEN_SHIFT) & 0xffU);
+    const auto blue = static_cast<unsigned char>((style >> PIXEL_BLUE_SHIFT) & 0xffU);
+    const auto styleAlpha = static_cast<unsigned int>((style >> PIXEL_ALPHA_SHIFT) & 0xffU);
+    unsigned char *pixels = _imageData.getBytes();
+    for (int y = 0; y < static_cast<int>(_bufferHeight); ++y) {
+        for (int x = 0; x < static_cast<int>(_bufferWidth); ++x) {
+            const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(_bufferWidth) +
+                                   static_cast<std::size_t>(x);
+            const unsigned int coverage = _coverage[at];
+            if (coverage == 0 || styleAlpha == 0) {
+                continue;
+            }
+            const auto alpha = static_cast<unsigned char>((coverage * styleAlpha + 127U) / 255U);
+            sourceOver(pixels + at * 4U, red, green, blue, alpha);
+        }
+    }
+}
+
+bool CanvasRenderingContext2DDelegate::clipRect(float x, float y, float w, float h, int &left, int &top,
+                                                int &right, int &bottom) const {
+    if (_bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+        return false;
+    }
+    // A rect may leave the canvas entirely, and a negative origin is not an error.
+    left = std::max(0, static_cast<int>(std::lround(x)));
+    top = std::max(0, static_cast<int>(std::lround(y)));
+    right = std::min(static_cast<int>(_bufferWidth), static_cast<int>(std::lround(x + w)));
+    bottom = std::min(static_cast<int>(_bufferHeight), static_cast<int>(std::lround(y + h)));
+    return right > left && bottom > top;
 }
 
 void CanvasRenderingContext2DDelegate::beginPath() {
@@ -143,16 +227,14 @@ void CanvasRenderingContext2DDelegate::stroke() {
 // nonzero rule for subpaths wound the same way. A subpath wound against
 // another to cut a hole is not distinguished from one that adds to it.
 void CanvasRenderingContext2DDelegate::compositePath(unsigned long style) {
-    if (_pixmap == None || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    if (_coverage == nullptr || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
         return;
     }
     const auto width = static_cast<unsigned int>(_bufferWidth);
     const auto height = static_cast<unsigned int>(_bufferHeight);
     XRenderPictFormat *maskFormat = XRenderFindStandardFormat(_dis, PictStandardA8);
-    XRenderPictFormat *targetFormat = XRenderFindStandardFormat(_dis, PictStandardARGB32);
     CC_ASSERT_NOT_NULL(maskFormat);
-    CC_ASSERT_NOT_NULL(targetFormat);
-    const Pixmap maskPixmap = XCreatePixmap(_dis, _pixmap, width, height, 8);
+    const Pixmap maskPixmap = XCreatePixmap(_dis, _win, width, height, 8);
     const Picture mask = XRenderCreatePicture(_dis, maskPixmap, maskFormat, 0, nullptr);
     const XRenderColor clear{0, 0, 0, 0};
     XRenderFillRectangle(_dis, PictOpSrc, mask, &clear, 0, 0, width, height);
@@ -164,45 +246,89 @@ void CanvasRenderingContext2DDelegate::compositePath(unsigned long style) {
                                        subpath.data(), static_cast<int>(subpath.size()), WindingRule);
         }
     }
-    const auto channel = [style](unsigned int shift) {
-        const unsigned long alpha = (style >> PIXEL_ALPHA_SHIFT) & 0xffU;
-        const unsigned long component = shift == PIXEL_ALPHA_SHIFT ? 0xffU : (style >> shift) & 0xffU;
-        return static_cast<unsigned short>((component * alpha + 127U) / 255U * 257U);
-    };
-    const XRenderColor colour{channel(PIXEL_RED_SHIFT), channel(PIXEL_GREEN_SHIFT), channel(PIXEL_BLUE_SHIFT), channel(PIXEL_ALPHA_SHIFT)};
-    const Picture source = XRenderCreateSolidFill(_dis, &colour);
-    const Picture target = XRenderCreatePicture(_dis, _pixmap, targetFormat, 0, nullptr);
-    XRenderComposite(_dis, PictOpOver, source, mask, target, 0, 0, 0, 0, 0, 0, width, height);
-    XRenderFreePicture(_dis, target);
-    XRenderFreePicture(_dis, source);
+    // The mask becomes the coverage and the colour is composited through it here, rather
+    // than handed to XRender as a target picture: the target would have to be an ARGB32
+    // drawable, and this server has no alpha to put in one.
+    XImage *image = XGetImage(_dis, maskPixmap, 0, 0, _bufferWidth, _bufferHeight, AllPlanes, ZPixmap);
+    if (image != nullptr) {
+        for (int y = 0; y < image->height; ++y) {
+            for (int x = 0; x < image->width; ++x) {
+                const auto pixel = static_cast<uint32_t>(XGetPixel(image, x, y));
+                const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(image->width) +
+                                       static_cast<std::size_t>(x);
+                _coverage[at] = static_cast<unsigned char>(
+                    std::min(255U, static_cast<unsigned int>(_coverage[at]) + coverageByte(image, pixel)));
+            }
+        }
+        XDestroyImage(image);
+    }
     XRenderFreePicture(_dis, white);
     XRenderFreePicture(_dis, mask);
     XFreePixmap(_dis, maskPixmap);
+    compositeCoverage(style);
 }
 
-// Strokes the current path's subpaths at the line width. Core X lines write
-// the pixel rather than blend it, so the colour is premultiplied to be the
-// ARGB32 pixel the pixmap holds.
-void CanvasRenderingContext2DDelegate::strokePath(unsigned long style) {
-    if (_pixmap == None || _gc == nullptr) {
+// The distance from a point to a segment, so a stroke can be covered analytically instead
+// of by stamping a disc along it. That keeps the stroke antialiased and alpha-correct, which
+// the core X line it replaces was not: it wrote pixels rather than blending them.
+static float distanceToSegment(double px, double py, const XPointDouble &from, const XPointDouble &to) {
+    const double dx = to.x - from.x;
+    const double dy = to.y - from.y;
+    const double lengthSquared = dx * dx + dy * dy;
+    double t = 0.0;
+    if (lengthSquared > 0.0) {
+        t = ((px - from.x) * dx + (py - from.y) * dy) / lengthSquared;
+        t = std::clamp(t, 0.0, 1.0);
+    }
+    const double nearestX = from.x + t * dx;
+    const double nearestY = from.y + t * dy;
+    return static_cast<float>(std::hypot(px - nearestX, py - nearestY));
+}
+
+void CanvasRenderingContext2DDelegate::strokeSegmentCoverage(const XPointDouble &from, const XPointDouble &to,
+                                                            float radius) {
+    if (_coverage == nullptr) {
         return;
     }
-    const unsigned long alpha = (style >> PIXEL_ALPHA_SHIFT) & 0xffU;
-    const auto premultiplied = [style, alpha](unsigned int shift) {
-        return (((style >> shift) & 0xffU) * alpha + 127U) / 255U << shift;
-    };
-    XSetForeground(_dis, _gc, (alpha << PIXEL_ALPHA_SHIFT) | premultiplied(PIXEL_RED_SHIFT) | premultiplied(PIXEL_GREEN_SHIFT) | premultiplied(PIXEL_BLUE_SHIFT));
-    XSetLineAttributes(_dis, _gc, static_cast<unsigned int>(std::lround(_lineWidth)), LineSolid, CapButt, JoinRound);
-    for (const auto &subpath : _path) {
-        std::vector<XPoint> points;
-        points.reserve(subpath.size());
-        for (const auto &point : subpath) {
-            points.push_back(XPoint{static_cast<short>(std::lround(point.x)), static_cast<short>(std::lround(point.y))});
-        }
-        if (points.size() > 1) {
-            XDrawLines(_dis, _pixmap, _gc, points.data(), static_cast<int>(points.size()), CoordModeOrigin);
+    const int left = std::max(0, static_cast<int>(std::floor(std::min(from.x, to.x) - radius - 1.0)));
+    const int top = std::max(0, static_cast<int>(std::floor(std::min(from.y, to.y) - radius - 1.0)));
+    const int right = std::min(static_cast<int>(_bufferWidth), static_cast<int>(std::ceil(std::max(from.x, to.x) + radius + 1.0)));
+    const int bottom = std::min(static_cast<int>(_bufferHeight), static_cast<int>(std::ceil(std::max(from.y, to.y) + radius + 1.0)));
+    for (int y = top; y < bottom; ++y) {
+        for (int x = left; x < right; ++x) {
+            const float distance = distanceToSegment(x + 0.5, y + 0.5, from, to);
+            // One pixel of ramp across the edge, which is what antialiasing means.
+            const float edge = radius + 0.5F - distance;
+            if (edge <= 0.0F) {
+                continue;
+            }
+            const auto coverage = static_cast<unsigned char>(
+                std::min(255.0F, std::max(0.0F, edge) * 255.0F));
+            const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(_bufferWidth) +
+                                   static_cast<std::size_t>(x);
+            _coverage[at] = static_cast<unsigned char>(std::min(255U, static_cast<unsigned int>(_coverage[at]) + coverage));
         }
     }
+}
+
+// Strokes the current path's subpaths at the line width, into the same coverage the fill
+// uses, so both composite through one arithmetic.
+void CanvasRenderingContext2DDelegate::strokePath(unsigned long style) {
+    if (_coverage == nullptr || _lineWidth <= 0.0F) {
+        return;
+    }
+    clearCoverage();
+    const float radius = _lineWidth / 2.0F;
+    for (const auto &subpath : _path) {
+        for (std::size_t index = 1; index < subpath.size(); ++index) {
+            strokeSegmentCoverage(subpath[index - 1], subpath[index], radius);
+        }
+        // A subpath of a single point is a dot in the web canvas, and a stroke of one.
+        if (subpath.size() == 1) {
+            strokeSegmentCoverage(subpath[0], subpath[0], radius);
+        }
+    }
+    compositeCoverage(style);
 }
 
 void CanvasRenderingContext2DDelegate::saveContext() {
@@ -212,44 +338,58 @@ void CanvasRenderingContext2DDelegate::restoreContext() {
 }
 
 void CanvasRenderingContext2DDelegate::clearRect(float x, float y, float w, float h) {
-    if (_pixmap == None || _gc == nullptr || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    if (_imageData.isNull() || !clipRect(x, y, w, h, left, top, right, bottom)) {
         return;
     }
-    // The rectangle, inside the canvas the script already has. This used to recreate the
-    // buffer at the rectangle's size, which is not what the web's clearRect does: it left
-    // the canvas resized to the last thing that was cleared, out of band with the size the
-    // context itself tracks, and a partial clear destroyed everything outside the
-    // rectangle. A zero foreground is a fully transparent ARGB32 pixel, which is what
-    // "cleared" means for a canvas that text is drawn onto.
-    const int left = static_cast<int>(std::lround(x));
-    const int top = static_cast<int>(std::lround(y));
-    const int right = static_cast<int>(std::lround(x + w));
-    const int bottom = static_cast<int>(std::lround(y + h));
-    // A rect may leave the canvas entirely, and a negative origin is not an error.
-    const int clippedLeft = std::max(0, left);
-    const int clippedTop = std::max(0, top);
-    const int clippedRight = std::min(static_cast<int>(_bufferWidth), right);
-    const int clippedBottom = std::min(static_cast<int>(_bufferHeight), bottom);
-    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) {
-        return;
+    // Zero is a fully transparent pixel in straight RGBA8, so this is what "cleared" means.
+    // The web's clearRect ignores the fill style and any clipping region; the clip region is
+    // not tracked at all by this delegate, so nothing else has to be honoured here.
+    unsigned char *pixels = _imageData.getBytes();
+    for (int row = top; row < bottom; ++row) {
+        memset(pixels + (static_cast<std::size_t>(row) * static_cast<std::size_t>(_bufferWidth) +
+                         static_cast<std::size_t>(left)) * 4U,
+               0, static_cast<std::size_t>(right - left) * 4U);
     }
-    XSetForeground(_dis, _gc, 0);
-    XFillRectangle(_dis, _pixmap, _gc, clippedLeft, clippedTop,
-                   static_cast<unsigned int>(clippedRight - clippedLeft),
-                   static_cast<unsigned int>(clippedBottom - clippedTop));
+    // The coverage mask is scratch for the shape being drawn, and a shape that starts after
+    // a partial clear must not inherit coverage from before it.
+    for (int row = top; row < bottom; ++row) {
+        memset(_coverage + static_cast<std::size_t>(row) * static_cast<std::size_t>(_bufferWidth) +
+                   static_cast<std::size_t>(left),
+               0, static_cast<std::size_t>(right - left));
+    }
 }
 
 void CanvasRenderingContext2DDelegate::fillRect(float x, float y, float w, float h) {
-    if (_bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    if (_imageData.isNull() || !clipRect(x, y, w, h, left, top, right, bottom)) {
         return;
     }
-
-    XSetForeground(_dis, _gc, _fillStyle);
-    XFillRectangle(_dis, _pixmap, _gc, x, y, w, h);
+    // Source-over with the fill style's own alpha, which is what the web does. The core X
+    // fill this replaces could not: it wrote a premultiplied pixel, which only blends if
+    // the target carries an alpha, and this server's target cannot.
+    const auto red = static_cast<unsigned char>((_fillStyle >> PIXEL_RED_SHIFT) & 0xffU);
+    const auto green = static_cast<unsigned char>((_fillStyle >> PIXEL_GREEN_SHIFT) & 0xffU);
+    const auto blue = static_cast<unsigned char>((_fillStyle >> PIXEL_BLUE_SHIFT) & 0xffU);
+    const auto alpha = static_cast<unsigned char>((_fillStyle >> PIXEL_ALPHA_SHIFT) & 0xffU);
+    unsigned char *pixels = _imageData.getBytes();
+    for (int row = top; row < bottom; ++row) {
+        for (int column = left; column < right; ++column) {
+            const std::size_t at = (static_cast<std::size_t>(row) * static_cast<std::size_t>(_bufferWidth) +
+                                    static_cast<std::size_t>(column)) * 4U;
+            sourceOver(pixels + at, red, green, blue, alpha);
+        }
+    }
 }
 
 void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float x, float y, float /*maxWidth*/) {
-    if (text.empty() || !_font || !_fontDraw || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
+    if (text.empty() || !_font || _coverage == nullptr || _bufferWidth < 1.0F || _bufferHeight < 1.0F) {
         return;
     }
 
@@ -257,51 +397,116 @@ void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float
     drawTextToPixmap(text, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]), _fillStyle);
 }
 
-void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style) {
-    const auto channel = [](unsigned long color, unsigned int shift) {
-        return static_cast<unsigned short>(((color >> shift) & 0xffU) * 257U);
-    };
-    const XftColor color{0, {channel(style, PIXEL_RED_SHIFT), channel(style, PIXEL_GREEN_SHIFT), channel(style, PIXEL_BLUE_SHIFT), channel(style, PIXEL_ALPHA_SHIFT)}};
-    for (const auto &run : resolveTextRuns(text)) {
-        const auto *bytes = reinterpret_cast<const FcChar8 *>(text.data() + run.begin);
-        const int length = static_cast<int>(run.length);
-        XftDrawStringUtf8(_fontDraw, &color, run.font, x, y, bytes, length);
-        XGlyphInfo extents{};
-        XftTextExtentsUtf8(_dis, run.font, bytes, length, &extents);
-        x += extents.xOff;
+// Composites one rasterised glyph into the coverage buffer. The glyph bitmap is FreeType's
+// own coverage, which is the one thing this delegate must not lose: it is what makes a
+// letter a letter rather than a slab.
+void CanvasRenderingContext2DDelegate::blitGlyphCoverage(int penX, int baselineY, const FT_GlyphSlot &slot) {
+    if (_coverage == nullptr || slot == nullptr || slot->bitmap.buffer == nullptr) {
+        return;
     }
-}
-
-// The JSB canvas asks for its pixels (fetchData) only when script reads them,
-// and every draw call invalidates the copy it read, so the pixmap is read back
-// once per read rather than after each draw -- and fillRect and fill, which
-// never read back themselves, reach script like text does.
-void CanvasRenderingContext2DDelegate::updateData() {
-    if (_pixmap != None && !_imageData.isNull()) {
-        readPixmapPixels();
-    }
-}
-
-void CanvasRenderingContext2DDelegate::readPixmapPixels() {
-    XImage *image = XGetImage(_dis, _pixmap, 0, 0, _bufferWidth, _bufferHeight, AllPlanes, ZPixmap);
-    CC_ASSERT_NOT_NULL(image);
-    int width = image->width;
-    int height = image->height;
-    unsigned char *data = _imageData.getBytes();
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; x++) {
-            const auto pixel = static_cast<uint32_t>(XGetPixel(image, x, y));
-            const uint32_t alpha = pixel >> 24U;
-            const auto straight = [alpha](uint32_t premultiplied) {
-                return alpha == 0U ? 0U : std::min(255U, (premultiplied * 255U + alpha / 2U) / alpha);
-            };
-            const uint32_t red = straight((pixel >> 16U) & 0xffU);
-            const uint32_t green = straight((pixel >> 8U) & 0xffU);
-            const uint32_t blue = straight(pixel & 0xffU);
-            reinterpret_cast<uint32_t *>(data)[y * width + x] = (alpha << 24U) | (blue << 16U) | (green << 8U) | red;
+    const FT_Bitmap &bitmap = slot->bitmap;
+    const int left = penX + slot->bitmap_left;
+    const int top = baselineY - slot->bitmap_top;
+    const int width = static_cast<int>(_bufferWidth);
+    const int height = static_cast<int>(_bufferHeight);
+    for (unsigned int row = 0; row < bitmap.rows; ++row) {
+        const int y = top + static_cast<int>(row);
+        if (y < 0 || y >= height) {
+            continue;
+        }
+        for (unsigned int column = 0; column < bitmap.width; ++column) {
+            const int x = left + static_cast<int>(column);
+            if (x < 0 || x >= width) {
+                continue;
+            }
+            const auto *source = bitmap.buffer + static_cast<std::ptrdiff_t>(row) * bitmap.pitch + column;
+            unsigned int coverage = 0;
+            if (bitmap.pixel_mode == FT_PIXEL_MODE_GRAY) {
+                coverage = *source;
+            } else if (bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
+                coverage = ((*source >> (7U - (column % 8U))) & 1U) != 0U ? 255U : 0U;
+            } else if (bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
+                // A colour glyph carries its own colour; the canvas draws with one fill
+                // style, so its alpha is the coverage and its colour is not used.
+                coverage = source[3];
+            }
+            if (coverage == 0) {
+                continue;
+            }
+            auto &target = _coverage[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                     static_cast<std::size_t>(x)];
+            target = static_cast<unsigned char>(std::max(static_cast<unsigned int>(target), coverage));
         }
     }
-    XDestroyImage(image);
+}
+
+void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style) {
+    if (_coverage == nullptr || _font == nullptr) {
+        return;
+    }
+    // Glyphs are rasterised through FreeType, from the face the Xft font already wraps, and
+    // the coverage is composited here. Xft cannot do this job on this platform: it produces
+    // antialiased output by compositing into a 32-bit drawable, and a server with no
+    // 32-bit visual has nowhere to put the alpha, so `XftDrawStringUtf8` into a mask draws
+    // nothing at all. Measured: a 128x128 canvas with "A A" drawn into it came back with
+    // 16384 of 16384 pixels fully transparent.
+    clearCoverage();
+    int penX = x;
+    for (const auto &run : resolveTextRuns(text)) {
+        FT_Face face = XftLockFace(run.font);
+        if (face == nullptr) {
+            continue;
+        }
+        FT_UInt previous = 0;
+        for (std::size_t offset = 0; offset < run.length;) {
+            FcChar32 codepoint = 0;
+            const auto *bytes = reinterpret_cast<const FcChar8 *>(text.data() + run.begin + offset);
+            int length = FcUtf8ToUcs4(bytes, &codepoint, static_cast<int>(run.length - offset));
+            if (length <= 0) {
+                codepoint = static_cast<unsigned char>(text[run.begin + offset]);
+                length = 1;
+            }
+            offset += static_cast<std::size_t>(length);
+            const FT_UInt index = FT_Get_Char_Index(face, codepoint);
+            if (index == 0) {
+                // A missing glyph still advances, and it has to advance by the same amount
+                // measureText reports or the text will not sit where it was asked to sit --
+                // and convertDrawPoint centres by that width. Xft's own extents are the one
+                // place both agree, so they are what this asks for.
+                XGlyphInfo extents{};
+                XftTextExtentsUtf8(_dis, run.font, bytes, length, &extents);
+                penX += extents.xOff;
+                previous = 0;
+                continue;
+            }
+            if (previous != 0 && !FT_HAS_COLOR(face)) {
+                FT_Vector kerning{};
+                FT_Get_Kerning(face, previous, index, FT_KERNING_DEFAULT, &kerning);
+                penX += kerning.x >> 6;
+            }
+            if (FT_Load_Glyph(face, index, FT_LOAD_DEFAULT) == 0 &&
+                FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) == 0) {
+                blitGlyphCoverage(penX, y, face->glyph);
+                penX += face->glyph->advance.x >> 6;
+            }
+            previous = FT_HAS_COLOR(face) ? 0 : index;
+        }
+        XftUnlockFace(run.font);
+    }
+    compositeCoverage(style);
+}
+
+// The canvas's pixels are this delegate's own buffer now, so there is nothing to read back:
+// every draw above has already composited into it. The interface still asks, because the
+// other platforms' delegates draw into a drawable and do need to copy out of one.
+void CanvasRenderingContext2DDelegate::updateData() {
+}
+
+void CanvasRenderingContext2DDelegate::releaseBuffer() {
+    free(_coverage);
+    _coverage = nullptr;
+    _coverageBytes = 0;
+    _imageData.clear();
 }
 
 CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::measureText(const ccstd::string &text) {
@@ -460,12 +665,6 @@ int CanvasRenderingContext2DDelegate::textAdvance(const ccstd::string &text) {
     return advance;
 }
 
-// x, y offset value
-int CanvasRenderingContext2DDelegate::drawText(const ccstd::string &text, int x, int y) {
-    XTextItem item{const_cast<char *>(text.c_str()), static_cast<int>(text.length()), 0, None};
-    return XDrawText(_dis, _pixmap, _gc, x, y, &item, 1);
-}
-
 CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::sizeWithText(const wchar_t *pszText, int nLen) {
     // if (text.empty())
     //     return ccstd::array<float, 2>{0.0f, 0.0f};
@@ -481,22 +680,6 @@ CanvasRenderingContext2DDelegate::Size CanvasRenderingContext2DDelegate::sizeWit
 }
 
 void CanvasRenderingContext2DDelegate::prepareBitmap(int nWidth, int nHeight) {
-}
-
-void CanvasRenderingContext2DDelegate::releaseBuffer() {
-    if (_fontDraw) {
-        XftDrawDestroy(_fontDraw);
-        _fontDraw = nullptr;
-    }
-    if (_gc) {
-        XFreeGC(_dis, _gc);
-        _gc = nullptr;
-    }
-    if (_pixmap) {
-        XFreePixmap(_dis, _pixmap);
-        _pixmap = None;
-    }
-    _imageData.clear();
 }
 
 void CanvasRenderingContext2DDelegate::fillTextureData() {
@@ -545,7 +728,7 @@ void CanvasRenderingContext2DDelegate::strokeText(const ccstd::string &text,
                                                   float x,
                                                   float y,
                                                   float /* maxWidth */) {
-    if (text.empty() || !_font || !_fontDraw || _bufferWidth < 1.0F || _bufferHeight < 1.0F || _lineWidth <= 0.0F) {
+    if (text.empty() || !_font || _coverage == nullptr || _bufferWidth < 1.0F || _bufferHeight < 1.0F || _lineWidth <= 0.0F) {
         return;
     }
     const Point origin = convertDrawPoint(Point{x, y}, text);

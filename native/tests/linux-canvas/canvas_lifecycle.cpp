@@ -173,7 +173,9 @@ int main() {
     alignas(Canvas) std::array<unsigned char, sizeof(Canvas)> storage;
     storage.fill(0xA5);
     auto *unallocated = new (storage.data()) Canvas;
-    require(unallocated->_gc == nullptr, "new canvas contains an indeterminate graphics context");
+    // Asked through the public contract rather than through a member: a canvas that has not
+    // been given a size has no pixels to hand out, and that is what a caller can observe.
+    require(unallocated->getDataRef().isNull(), "a new canvas reports pixels before it has a size");
     unallocated->~Canvas();
     requireReleased();
 
@@ -237,9 +239,11 @@ int main() {
     {
         Canvas canvas;
         canvas.recreateBuffer(16, 16);
-        require(graphicsContexts == 1 && pixmaps == 1 && fontDraws == 1, "initial buffer resources were not allocated");
+        require(graphicsContexts == 0 && pixmaps == 0 && fontDraws == 0,
+                "a canvas allocated a server resource: its pixels are its own, and it must not");
         canvas.recreateBuffer(32, 32);
-        require(graphicsContexts == 1 && pixmaps == 1 && fontDraws == 1, "buffer resize did not replace its resources");
+        require(graphicsContexts == 0 && pixmaps == 0 && fontDraws == 0,
+                "buffer resize allocated a server resource");
         canvas.updateFont("sans-serif", 12, false, false, false, false);
         require(fonts == 1, "font was not loaded");
         canvas.updateFont("sans-serif", 18, false, false, false, false);
@@ -247,7 +251,8 @@ int main() {
         canvas.updateFont("sans-serif", 60, false, false, false, false);
         require(canvas.measureText("Play")[1] >= 50, "requested 60px font was replaced by a small fallback");
         canvas.recreateBuffer(0, 0);
-        require(graphicsContexts == 0 && pixmaps == 0 && fontDraws == 0, "zero-sized buffer retained resources");
+        require(graphicsContexts == 0 && pixmaps == 0 && fontDraws == 0 && canvas.getDataRef().isNull(),
+                "zero-sized buffer retained resources");
         canvas.recreateBuffer(128, 128);
         canvas.setTextAlign(Canvas::TextAlign::LEFT);
         canvas.setTextBaseline(Canvas::TextBaseline::TOP);

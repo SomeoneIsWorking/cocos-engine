@@ -41,6 +41,8 @@
 #include <X11/extensions/Xrender.h>
 #include <X11/Xos.h>
 #include <X11/Xutil.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 namespace cc {
 
@@ -99,10 +101,15 @@ private:
     std::vector<TextRun> resolveTextRuns(const ccstd::string &text);
     int textAdvance(const ccstd::string &text);
     void drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style);
+    void blitGlyphCoverage(int penX, int baselineY, const FT_GlyphSlot &slot);
     void compositePath(unsigned long style);
     void strokePath(unsigned long style);
-    void readPixmapPixels();
-    int drawText(const ccstd::string &text, int x, int y);
+    void clearCoverage();
+    void compositeCoverage(unsigned long style);
+    void sourceOver(unsigned char *pixel, unsigned char red, unsigned char green, unsigned char blue,
+                    unsigned char alpha) const;
+    bool clipRect(float x, float y, float w, float h, int &left, int &top, int &right, int &bottom) const;
+    void strokeSegmentCoverage(const XPointDouble &from, const XPointDouble &to, float radius);
     Size sizeWithText(const wchar_t *pszText, int nLen);
     void prepareBitmap(int nWidth, int nHeight);
     void releaseBuffer();
@@ -113,13 +120,17 @@ public:
     Display *_dis{nullptr};
     int _screen{0};
     Drawable _win{0};
-    Drawable _pixmap{0};
     XftFont *_font{nullptr};
     std::vector<XftFont *> _fallbackFonts;
-    XftDraw *_fontDraw{nullptr};
-    GC _gc{nullptr};
 
 private:
+    // Antialiased coverage for the shape currently being drawn, 0..255 per pixel, and the
+    // canvas's own pixels as straight RGBA8. The canvas is *not* an X drawable: see
+    // recreateBuffer. `_coverage` is the canonical buffer and the A8 pixmap beside it is
+    // where Xft writes, because a server with no 32-bit visual cannot hold a colour canvas
+    // but can always hold an 8-bit alpha mask.
+    unsigned char *_coverage{nullptr};
+    std::size_t _coverageBytes{0};
     // The current path, one polyline per subpath, as the web canvas keeps it
     // between beginPath and the fill or stroke that consumes it.
     std::vector<std::vector<XPointDouble>> _path;
