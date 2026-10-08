@@ -86,6 +86,10 @@ void SystemWindow::closeWindow() {
 #endif
 }
 
+bool SystemWindow::isHidden() const {
+    return SDLHelper::isWindowHidden(_window);
+}
+
 uintptr_t SystemWindow::getWindowHandle() const {
     return _windowHandle;
 }

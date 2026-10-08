@@ -47,6 +47,7 @@ public:
 
     virtual uint32_t getWindowId() const override { return _windowId; }
     uintptr_t getWindowHandle() const override;
+    bool isHidden() const override;
 
     uintptr_t getDisplay() const;
     Size getViewSize() const override;

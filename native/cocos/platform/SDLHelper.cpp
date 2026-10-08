@@ -430,4 +430,8 @@ bool SDLHelper::isWindowMinimized(SDL_Window *window) {
     return SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED;
 }
 
+bool SDLHelper::isWindowHidden(SDL_Window *window) {
+    return (SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN) != 0;
+}
+
 } // namespace cc

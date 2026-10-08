@@ -116,6 +116,10 @@ scene::RenderWindow *Root::createRenderWindowFromSystemWindow(ISystemWindow *win
     info.height = static_cast<uint32_t>(size.height);
     info.windowHandle = reinterpret_cast<void *>(handle); // NOLINT
     info.windowId = window->getWindowId();
+    // A hidden window is never shown, so a vsynced swap would wait for a frame that never comes.
+    if (window->isHidden()) {
+        info.vsyncMode = gfx::VsyncMode::OFF;
+    }
 
     gfx::Swapchain *swapchain = gfx::Device::getInstance()->createSwapchain(info);
     _swapchains.emplace_back(swapchain);
