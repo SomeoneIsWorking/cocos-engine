@@ -96,6 +96,8 @@ public:
 
     virtual void closeWindow() {}
     virtual uintptr_t getWindowHandle() const = 0;
+    /** Created unmapped: nothing presents it, so nothing paces its swaps either. */
+    virtual bool isHidden() const { return false; }
     virtual Size getViewSize() const = 0;
     virtual void setViewSize(uint32_t width, uint32_t height) {}
     /**
