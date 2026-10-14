@@ -542,6 +542,8 @@ export class NodeEventProcessor {
         } else if (this.previousMouseIn) {
             event.type = NodeEventType.MOUSE_LEAVE;
             node.dispatchEvent(event);
+            // The dispatcher hands the same event to the next processor, which must still see a move.
+            event.type = NodeEventType.MOUSE_MOVE;
             this.previousMouseIn = false;
             _currentHovered = null;
         }
