@@ -394,7 +394,69 @@ void CanvasRenderingContext2DDelegate::fillText(const ccstd::string &text, float
     }
 
     Point offsetPoint = convertDrawPoint(Point{x, y}, text);
-    drawTextToPixmap(text, static_cast<int>(offsetPoint[0]), static_cast<int>(offsetPoint[1]), _fillStyle);
+    const int left = static_cast<int>(offsetPoint[0]);
+    const int top = static_cast<int>(offsetPoint[1]);
+    if (shadowVisible()) {
+        rasterizeText(text, left + static_cast<int>(std::lround(_shadowOffsetX)),
+                      top + static_cast<int>(std::lround(_shadowOffsetY)));
+        // The canvas's blur is a Gaussian whose standard deviation is half of shadowBlur.
+        blurCoverage(_shadowBlur / 2.0F);
+        compositeCoverage(_shadowStyle);
+    }
+    drawTextToPixmap(text, left, top, _fillStyle);
+}
+
+bool CanvasRenderingContext2DDelegate::shadowVisible() const {
+    const auto alpha = (_shadowStyle >> PIXEL_ALPHA_SHIFT) & 0xffU;
+    return alpha != 0 && (_shadowBlur > 0.0F || _shadowOffsetX != 0.0F || _shadowOffsetY != 0.0F);
+}
+
+// Separable Gaussian over the coverage buffer, out to three standard deviations.
+void CanvasRenderingContext2DDelegate::blurCoverage(float sigma) {
+    if (_coverage == nullptr || sigma <= 0.0F) {
+        return;
+    }
+    const int radius = static_cast<int>(std::ceil(sigma * 3.0F));
+    std::vector<float> kernel(static_cast<std::size_t>(radius) * 2U + 1U);
+    float total = 0.0F;
+    for (int offset = -radius; offset <= radius; ++offset) {
+        const float weight = std::exp(-static_cast<float>(offset * offset) / (2.0F * sigma * sigma));
+        kernel[static_cast<std::size_t>(offset + radius)] = weight;
+        total += weight;
+    }
+    for (auto &weight : kernel) {
+        weight /= total;
+    }
+    const int width = static_cast<int>(_bufferWidth);
+    const int height = static_cast<int>(_bufferHeight);
+    std::vector<float> pass(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    const auto at = [width](int x, int y) {
+        return static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x);
+    };
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float sum = 0.0F;
+            for (int offset = -radius; offset <= radius; ++offset) {
+                const int column = x + offset;
+                if (column >= 0 && column < width) {
+                    sum += kernel[static_cast<std::size_t>(offset + radius)] * static_cast<float>(_coverage[at(column, y)]);
+                }
+            }
+            pass[at(x, y)] = sum;
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float sum = 0.0F;
+            for (int offset = -radius; offset <= radius; ++offset) {
+                const int row = y + offset;
+                if (row >= 0 && row < height) {
+                    sum += kernel[static_cast<std::size_t>(offset + radius)] * pass[at(x, row)];
+                }
+            }
+            _coverage[at(x, y)] = static_cast<unsigned char>(std::min(255L, std::lround(sum)));
+        }
+    }
 }
 
 // Composites one rasterised glyph into the coverage buffer. The glyph bitmap is FreeType's
@@ -441,6 +503,14 @@ void CanvasRenderingContext2DDelegate::blitGlyphCoverage(int penX, int baselineY
 }
 
 void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style) {
+    if (_coverage == nullptr || _font == nullptr) {
+        return;
+    }
+    rasterizeText(text, x, y);
+    compositeCoverage(style);
+}
+
+void CanvasRenderingContext2DDelegate::rasterizeText(const ccstd::string &text, int x, int y) {
     if (_coverage == nullptr || _font == nullptr) {
         return;
     }
@@ -493,7 +563,6 @@ void CanvasRenderingContext2DDelegate::drawTextToPixmap(const ccstd::string &tex
         }
         XftUnlockFace(run.font);
     }
-    compositeCoverage(style);
 }
 
 // The canvas's pixels are this delegate's own buffer now, so there is nothing to read back:
@@ -573,6 +642,22 @@ void CanvasRenderingContext2DDelegate::setStrokeStyle(uint8_t r, uint8_t g, uint
 
 void CanvasRenderingContext2DDelegate::setLineWidth(float lineWidth) {
     _lineWidth = lineWidth;
+}
+
+void CanvasRenderingContext2DDelegate::setShadowBlur(float blur) {
+    _shadowBlur = std::max(0.0F, blur);
+}
+
+void CanvasRenderingContext2DDelegate::setShadowColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    _shadowStyle = RGBA(r, g, b, a);
+}
+
+void CanvasRenderingContext2DDelegate::setShadowOffsetX(float offsetX) {
+    _shadowOffsetX = offsetX;
+}
+
+void CanvasRenderingContext2DDelegate::setShadowOffsetY(float offsetY) {
+    _shadowOffsetY = offsetY;
 }
 
 const cc::Data &CanvasRenderingContext2DDelegate::getDataRef() const {

@@ -83,10 +83,10 @@ public:
     void strokeText(const ccstd::string &text, float x, float y, float /*maxWidth*/) override;
     void rect(float x, float y, float w, float h) override;
     void updateData() override;
-    void setShadowBlur(float blur) override {}
-    void setShadowColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) override {}
-    void setShadowOffsetX(float offsetX) override {}
-    void setShadowOffsetY(float offsetY) override {}
+    void setShadowBlur(float blur) override;
+    void setShadowColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) override;
+    void setShadowOffsetX(float offsetX) override;
+    void setShadowOffsetY(float offsetY) override;
 
 private:
     struct TextRun {
@@ -101,6 +101,9 @@ private:
     std::vector<TextRun> resolveTextRuns(const ccstd::string &text);
     int textAdvance(const ccstd::string &text);
     void drawTextToPixmap(const ccstd::string &text, int x, int y, unsigned long style);
+    void rasterizeText(const ccstd::string &text, int x, int y);
+    bool shadowVisible() const;
+    void blurCoverage(float sigma);
     void blitGlyphCoverage(int penX, int baselineY, const FT_GlyphSlot &slot);
     void compositePath(unsigned long style);
     void strokePath(unsigned long style);
@@ -154,6 +157,10 @@ private:
     TextBaseline _textBaseLine{TextBaseline::TOP};
     unsigned long _fillStyle{0};
     unsigned long _strokeStyle{0};
+    unsigned long _shadowStyle{0};
+    float _shadowBlur{0.0F};
+    float _shadowOffsetX{0.0F};
+    float _shadowOffsetY{0.0F};
 };
 
 } // namespace cc

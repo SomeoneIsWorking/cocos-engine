@@ -281,6 +281,45 @@ int main() {
         XSync(canvas._dis, False);
     }
     requireReleased();
+
+    {
+        // A shadow is the fill's coverage, offset and blurred, composited under it in the
+        // shadow colour; with no offset and no blur there is none (HTML canvas, "shadows").
+        Canvas canvas;
+        canvas.updateFont("sans-serif", 60, false, false, false, false);
+        canvas.setTextAlign(Canvas::TextAlign::LEFT);
+        canvas.setTextBaseline(Canvas::TextBaseline::TOP);
+        canvas.setFillStyle(255, 255, 255, 255);
+        const auto draw = [&canvas](float blur, float offset) {
+            canvas.recreateBuffer(128, 128);
+            canvas.setShadowColor(0, 0, 0, 255);
+            canvas.setShadowBlur(blur);
+            canvas.setShadowOffsetX(offset);
+            canvas.setShadowOffsetY(offset);
+            canvas.fillText("Play", 1, 1, 0);
+            const auto *pixels = canvas.getDataRef().getBytes();
+            int dark = 0;
+            int ink = 0;
+            int lastRow = -1;
+            for (int index = 0; index < 128 * 128; ++index) {
+                const auto *pixel = pixels + index * 4;
+                if (pixel[3] != 0) {
+                    ++ink;
+                    lastRow = index / 128;
+                    dark += pixel[0] < 64 && pixel[3] > 192;
+                }
+            }
+            return std::array<int, 3>{dark, ink, lastRow};
+        };
+        const auto none = draw(0, 0);
+        require(none[0] == 0, "a shadow with no offset and no blur was drawn");
+        const auto sharp = draw(0, 8);
+        require(sharp[0] > 0, "an offset shadow was not drawn");
+        require(sharp[2] >= none[2] + 6, "the shadow is not below the text by its offset");
+        const auto soft = draw(6, 8);
+        require(soft[1] > sharp[1], "a blurred shadow covers no more than a sharp one");
+    }
+    requireReleased();
     verifyWindowClose(*windows, *mainWindow);
     std::puts("canvas lifecycle: scalable outlined 60px text and font-owning contexts released all X11 resources");
     std::puts("window lifecycle: programmatic close delivered one CLOSE event with the engine window ID");
