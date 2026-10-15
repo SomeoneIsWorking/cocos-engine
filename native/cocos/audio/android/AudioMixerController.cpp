@@ -145,7 +145,8 @@ void AudioMixerController::updateTrackPitch(Track *track) {
     }
     // The track's PCM is decoded at the device rate. Declaring it recorded at the device rate
     // times its pitch makes the mixer resample it to play that much faster and higher.
-    const auto trackSampleRate = static_cast<uint32_t>(std::lround(static_cast<float>(_sampleRate) * track->_pitch));
+    const auto fastest = static_cast<double>(AudioResampler::fastestInputRate(_sampleRate));
+    const auto trackSampleRate = static_cast<uint32_t>(std::min(std::round(static_cast<double>(_sampleRate) * track->_pitch), fastest));
     _mixer->setParameter(track->getName(), AudioMixer::RESAMPLE, AudioMixer::SAMPLE_RATE,
                          reinterpret_cast<void *>(static_cast<uintptr_t>(trackSampleRate)));
     track->_isPitchDirty = false;

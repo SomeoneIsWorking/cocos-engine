@@ -37,6 +37,9 @@ namespace cc {
 
 class AudioResampler {
 public:
+    // The fastest input rate for an output rate: the U2.30 phase increment holds a ratio under 4.
+    static uint32_t fastestInputRate(uint32_t outSampleRate);
+
     // Determines quality of SRC.
     //  LOW_QUALITY: linear interpolator (1st order)
     //  MED_QUALITY: cubic interpolator (3rd order)

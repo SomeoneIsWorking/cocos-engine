@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <cmath>
 #include <new>
 #include "audio/android/cutils/log.h"
 #include "audio/android/utils/Utils.h"
@@ -83,6 +84,10 @@ private:
 
 /*static*/
 const double AudioResampler::kPhaseMultiplier = 1L << AudioResampler::kNumPhaseBits;
+
+uint32_t AudioResampler::fastestInputRate(uint32_t outSampleRate) {
+    return static_cast<uint32_t>(std::floor(static_cast<double>(UINT32_MAX) / kPhaseMultiplier * outSampleRate));
+}
 
 bool AudioResampler::qualityIsSupported(src_quality quality) {
     switch (quality) {

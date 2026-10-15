@@ -25,6 +25,7 @@
 
 #include "audio/include/AudioEngine.h"
 #include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -285,7 +286,10 @@ void AudioEngine::setPitch(int audioID, float pitch) {
     if (it == sAudioIDInfoMap.end()) {
         return;
     }
-    pitch = std::clamp(pitch, MIN_PITCH, MAX_PITCH);
+    if (!std::isfinite(pitch) || pitch <= 0.0F) {
+        CC_LOG_ERROR("AudioEngine::setPitch-->audio %d cannot play at pitch %f", audioID, pitch);
+        return;
+    }
     if (it->second.pitch != pitch) {
         sAudioEngineImpl->setPitch(audioID, pitch);
         it->second.pitch = pitch;

@@ -170,7 +170,8 @@ public:
      * An instance that has not started yet starts at it.
      *
      * @param audioID An audioID returned by the play2d function.
-     * @param pitch Pitch value (range from 0.5 to 2.0; 1.0 plays the audio at its own).
+     * @param pitch A positive rate, 1.0 the audio's own; each platform's player clamps it to the
+     * range it can play (OpenAL any, Android's mixer below 4, OpenSL ES its reported rates).
      */
     static void setPitch(int audioID, float pitch);
 
@@ -178,7 +179,7 @@ public:
      * Gets the pitch value of an audio instance.
      *
      * @param audioID An audioID returned by the play2d function.
-     * @return Pitch value (range from 0.5 to 2.0).
+     * @return The pitch last set.
      */
     static float getPitch(int audioID);
 
@@ -408,9 +409,6 @@ protected:
     static bool sIsEnabled;
 
 private:
-    // The pitch range every backend plays: Android's OpenSL ES playback rate is 500 to 2000 per mille.
-    static constexpr float MIN_PITCH = 0.5F;
-    static constexpr float MAX_PITCH = 2.0F;
 
     static float sVolumeFactor;
     static events::EnterBackground::Listener sOnPauseListenerID;
