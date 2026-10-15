@@ -200,9 +200,15 @@ void UrlAudioPlayer::setPitch(float pitch) {
         ALOGW("UrlAudioPlayer (%p) has no playback rate interface, could not set pitch %f!", this, pitch);
         return;
     }
-    // Android's player changes pitch with its rate (SL_RATEPROP_NOPITCHCORAUDIO), 500 to 2000 per mille.
-    const auto permille = static_cast<SLpermille>(std::lround(pitch * 1000.0F));
-    SLresult r = (*_playbackRateItf)->SetRate(_playbackRateItf, permille);
+    // Android's player changes pitch with its rate (SL_RATEPROP_NOPITCHCORAUDIO), within the range it reports.
+    SLpermille slowest = 0;
+    SLpermille fastest = 0;
+    SLpermille step = 0;
+    SLuint32 capabilities = 0;
+    SLresult r = (*_playbackRateItf)->GetRateRange(_playbackRateItf, 0, &slowest, &fastest, &step, &capabilities);
+    SL_RETURN_IF_FAILED(r, "UrlAudioPlayer::setPitch GetRateRange failed");
+    const auto permille = static_cast<SLpermille>(std::clamp(std::lround(pitch * 1000.0F), static_cast<long>(slowest), static_cast<long>(fastest)));
+    r = (*_playbackRateItf)->SetRate(_playbackRateItf, permille);
     SL_RETURN_IF_FAILED(r, "UrlAudioPlayer::setPitch %d failed", static_cast<int>(permille));
 }
 
