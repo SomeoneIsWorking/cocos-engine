@@ -61,6 +61,14 @@ export class UIRendererManager {
         }
     }
 
+    public markDirtyRenderersWhere (test: (uiRenderer: UIRenderer | UIMeshRenderer) => boolean): void {
+        for (const uiRenderer of this._allRenderers) {
+            if (test(uiRenderer)) {
+                uiRenderer.markForUpdateRenderData();
+            }
+        }
+    }
+
     public updateAllDirtyRenderers (): void {
         const dirtyRenderers = this._dirtyRenderers;
         for (let i = 0; i < this._dirtyRenderers.length; i++) {
@@ -68,6 +76,8 @@ export class UIRendererManager {
                 assert(dirtyRenderers[i]._internalId !== -1);
             }
             dirtyRenderers[i].updateRenderer();
+            // Marked again by a later renderer in this pass, it is updated again in this pass.
+            dirtyRenderers[i]._dirtyVersion = -1;
         }
         this._dirtyRenderers.length = 0;
         this._dirtyVersion++;

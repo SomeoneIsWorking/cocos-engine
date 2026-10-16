@@ -269,6 +269,23 @@ export class LetterAtlas {
     private _halfBleed = 0;
     public declare fontDefDictionary: FontAtlas;
     private _dirty = false;
+    private _generation = 0;
+    private _emptiedFrame = -1;
+    private _onEmptied: (() => void) | null = null;
+
+    /**
+     * @en Counts the times the atlas was emptied; a letter definition from an earlier generation is gone.
+     */
+    get generation (): number {
+        return this._generation;
+    }
+
+    /**
+     * @en Called after a full atlas is emptied, so the labels lettered in it letter again.
+     */
+    public setOnEmptied (onEmptied: (() => void) | null): void {
+        this._onEmptied = onEmptied;
+    }
 
     constructor (width: number, height: number) {
         const texture = new LetterRenderTexture();
@@ -291,18 +308,19 @@ export class LetterAtlas {
         const width = img.width;
         const height = img.height;
 
-        if ((this._x + width + space) > this._width) {
-            this._x = space;
-            this._y = this._nextY;
-        }
-
-        if ((this._y + height) > this._nextY) {
-            this._nextY = this._y + height + space;
-        }
-
-        if (this._nextY > this._height) {
-            warnID(12100);
-            return null;
+        if (!this._place(width, height)) {
+            // Emptied at most once a frame, so letters that cannot all fit do not empty it in a loop.
+            const frame = director.getTotalFrames();
+            if (this._isEmpty() || this._emptiedFrame === frame) {
+                warnID(12100);
+                return null;
+            }
+            this._emptiedFrame = frame;
+            this._empty();
+            if (!this._place(width, height)) {
+                warnID(12100);
+                return null;
+            }
         }
 
         if (!this.fontDefDictionary.texture) {
@@ -336,6 +354,38 @@ export class LetterAtlas {
         return letterDefinition;
     }
 
+    private _place (width: number, height: number): boolean {
+        let x = this._x;
+        let y = this._y;
+        let nextY = this._nextY;
+        if ((x + width + space) > this._width) {
+            x = space;
+            y = nextY;
+        }
+        if ((y + height) > nextY) {
+            nextY = y + height + space;
+        }
+        if (nextY > this._height) {
+            return false;
+        }
+        this._x = x;
+        this._y = y;
+        this._nextY = nextY;
+        return true;
+    }
+
+    private _isEmpty (): boolean {
+        return this._x === space && this._y === space && this._nextY === space;
+    }
+
+    // The texture is kept, so labels holding it stay valid; only their letter definitions go.
+    private _empty (): void {
+        this.reset();
+        if (this._onEmptied) {
+            this._onEmptied();
+        }
+    }
+
     public update (): void {
         if (!this._dirty) {
             return;
@@ -348,6 +398,7 @@ export class LetterAtlas {
         this._x = space;
         this._y = space;
         this._nextY = space;
+        this._generation++;
 
         // const chars = this.letterDefinitions;
         // for (let i = 0, l = (Object.keys(chars)).length; i < l; i++) {
