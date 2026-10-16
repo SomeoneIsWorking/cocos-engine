@@ -170,7 +170,10 @@ void CocosApplication::runScript(const ccstd::string &filePath) {
 
 void CocosApplication::handleException(const char *location, const char *message, const char *stack) {
     // Send exception information to server like Tencent Bugly.
-    CC_LOG_ERROR("\nUncaught Exception:\n - location :  %s\n - msg : %s\n - detail : \n      %s\n", location, message, stack);
+    // The location can be a whole minified source line; logged last so it cannot crowd out the rest.
+    CC_LOG_ERROR("Uncaught Exception: %s", message);
+    CC_LOG_ERROR("Uncaught Exception stack: %s", stack);
+    CC_LOG_ERROR("Uncaught Exception location: %s", location);
 }
 
 void CocosApplication::setXXTeaKey(const ccstd::string &key) {
