@@ -27,7 +27,7 @@ import { js, Color } from '../../../core';
 import { IBatcher } from '../../renderer/i-batcher';
 import { Label } from '../../components/label';
 import { fillMeshVertices3D } from '../utils';
-import { letterFont } from './letter-font';
+import { letterFont, shareLetterAtlas } from './letter-font';
 import type { RenderData } from '../../renderer/render-data';
 
 const tempColor = new Color(255, 255, 255, 255);
@@ -41,6 +41,16 @@ export const letter = {
         const renderData = comp.requestRenderData();
         renderData.resize(0, 0);
         return renderData;
+    },
+
+    updateRenderData (comp: Label): void {
+        const generation = shareLetterAtlas().generation;
+        letterFont.updateRenderData.call(this, comp);
+        // The atlas was emptied partway through, taking the letters placed before it.
+        if (shareLetterAtlas().generation !== generation && comp.renderData) {
+            comp.renderData.vertDirty = true;
+            letterFont.updateRenderData.call(this, comp);
+        }
     },
 
     fillBuffers (comp: Label, renderer: IBatcher): void {

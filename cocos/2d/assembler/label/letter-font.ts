@@ -23,7 +23,9 @@
 */
 
 import { js } from '../../../core';
-import { Label } from '../../components';
+import { BitmapFont } from '../../assets/bitmap-font';
+import { Label, CacheMode } from '../../components/label';
+import { uiRendererManager } from '../../framework/ui-renderer-manager';
 import { bmfontUtils } from './bmfontUtils';
 import { shareLabelInfo, LetterAtlas, computeHash, LetterRenderTexture } from './font-utils';
 
@@ -33,13 +35,24 @@ const _isBold = false;
 
 let _shareAtlas: LetterAtlas | null  = null;
 
+function isLetteredLabel (renderer: unknown): boolean {
+    return renderer instanceof Label && renderer.cacheMode === CacheMode.CHAR && !(renderer.font instanceof BitmapFont);
+}
+
+/**
+ * @en The atlas every CHAR-mode label letters in; when it fills it is emptied and those labels letter again.
+ */
+export function shareLetterAtlas (): LetterAtlas {
+    if (!_shareAtlas) {
+        _shareAtlas = new LetterAtlas(_atlasWidth, _atlasHeight);
+        _shareAtlas.setOnEmptied(() => uiRendererManager.markDirtyRenderersWhere(isLetteredLabel));
+    }
+    return _shareAtlas;
+}
+
 export const letterFont = js.mixin(bmfontUtils, {
     getAssemblerData () {
-        if (!_shareAtlas) {
-            _shareAtlas = new LetterAtlas(_atlasWidth, _atlasHeight);
-        }
-
-        return _shareAtlas.getTexture() as LetterRenderTexture | null;
+        return shareLetterAtlas().getTexture() as LetterRenderTexture | null;
     },
 
     _updateFontFamily (comp) {

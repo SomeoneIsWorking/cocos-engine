@@ -90,7 +90,8 @@ export class RenderDrawInfo {
     protected declare _uint32SharedBuffer: Uint32Array;
 
     // SharedBuffer of pos/uv/color
-    protected declare _render2dBuffer: Float32Array;
+    // A renderer that never had vertices still has a buffer, of length zero.
+    protected _render2dBuffer = new Float32Array(0);
 
     constructor (nativeDrawInfo?: NativeRenderDrawInfo) {
         this.init(nativeDrawInfo);
