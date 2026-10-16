@@ -977,7 +977,8 @@ Object.defineProperty(nodeProto, 'activeInHierarchy', {
     configurable: true,
     enumerable: true,
     get(): Readonly<Boolean> {
-        return this._sharedUint8Arr[0] != 0; // Uint8, 0: activeInHierarchy
+        // A destroyed node's shared array is nulled by `_destruct`; it reads as inactive, as on the web.
+        return this._sharedUint8Arr !== null && this._sharedUint8Arr[0] != 0; // Uint8, 0: activeInHierarchy
     },
     set(v) {
         this._sharedUint8Arr[0] = (v ? 1 : 0); // Uint8, 0: activeInHierarchy
@@ -988,7 +989,8 @@ Object.defineProperty(nodeProto, '_activeInHierarchy', {
     configurable: true,
     enumerable: true,
     get(): Readonly<Boolean> {
-        return this._sharedUint8Arr[0] != 0; // Uint8, 0: activeInHierarchy
+        // A destroyed node's shared array is nulled by `_destruct`; it reads as inactive, as on the web.
+        return this._sharedUint8Arr !== null && this._sharedUint8Arr[0] != 0; // Uint8, 0: activeInHierarchy
     },
     set(v) {
         this._sharedUint8Arr[0] = (v ? 1 : 0); // Uint8, 0: activeInHierarchy
@@ -1085,7 +1087,8 @@ Object.defineProperty(nodeProto, '_active', {
     configurable: true,
     enumerable: true,
     get(): Readonly<Boolean> {
-        return this._sharedUint8Arr[1] != 0; // Uint8, 1: active
+        // A destroyed node's shared array is nulled by `_destruct`; it reads as inactive, as on the web.
+        return this._sharedUint8Arr !== null && this._sharedUint8Arr[1] != 0; // Uint8, 1: active
     },
     set(v) {
         this._sharedUint8Arr[1] = (v ? 1 : 0); // Uint8, 1: active
@@ -1096,7 +1099,8 @@ Object.defineProperty(nodeProto, 'active', {
     configurable: true,
     enumerable: true,
     get(): Readonly<Boolean> {
-        return this._sharedUint8Arr[1] != 0; // Uint8, 1: active
+        // A destroyed node's shared array is nulled by `_destruct`; it reads as inactive, as on the web.
+        return this._sharedUint8Arr !== null && this._sharedUint8Arr[1] != 0; // Uint8, 1: active
     },
     set(v) {
         this.setActive(!!v);
