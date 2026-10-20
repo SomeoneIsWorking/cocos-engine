@@ -183,6 +183,11 @@ export class Director extends EventTarget {
      * @deprecated since v3.5.0, this is an engine private interface that will be removed in the future.
      */
     public _nodeActivator: NodeActivator = new NodeActivator();
+    /**
+     * @en Scale of the delta time `tick` runs a frame with; 0 holds the game while frames still draw.
+     * @zh tick 运行一帧所用的时间缩放。
+     */
+    public gameSpeed = 1;
     private _invalid: boolean = false;
     private _paused: boolean = false;
     private _root: Root | null = null;
@@ -644,9 +649,10 @@ export class Director extends EventTarget {
     /**
      * @en Run main loop of director
      * @zh 运行主循环
-     * @param dt Delta time in seconds
+     * @param frameDt Delta time in seconds, before `gameSpeed`
      */
-    public tick (dt: number): void {
+    public tick (frameDt: number): void {
+        const dt = frameDt * this.gameSpeed;
         if (!this._invalid) {
             this.emit(Director.EVENT_BEGIN_FRAME);
             if (!EDITOR_NOT_IN_PREVIEW) {
