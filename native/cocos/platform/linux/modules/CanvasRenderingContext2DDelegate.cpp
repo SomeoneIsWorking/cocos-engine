@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -56,6 +57,37 @@ constexpr unsigned int PIXEL_BLUE_SHIFT = 0U;
 constexpr unsigned int PIXEL_GREEN_SHIFT = 8U;
 constexpr unsigned int PIXEL_RED_SHIFT = 16U;
 constexpr unsigned int PIXEL_ALPHA_SHIFT = 24U;
+
+// FcFreeTypeQuery scans a font file's whole charset, so each registered file is queried once.
+class FontFileQueries {
+public:
+    FontFileQueries() = default;
+    FontFileQueries(const FontFileQueries &) = delete;
+    FontFileQueries &operator=(const FontFileQueries &) = delete;
+    FontFileQueries(FontFileQueries &&) = delete;
+    FontFileQueries &operator=(FontFileQueries &&) = delete;
+    ~FontFileQueries() {
+        for (auto &entry : _queried) {
+            FcPatternDestroy(entry.second);
+        }
+    }
+
+    // A copy of the file's pattern, which the caller owns.
+    FcPattern *query(const ccstd::string &path) {
+        auto found = _queried.find(path);
+        if (found == _queried.end()) {
+            FcPattern *pattern = FcFreeTypeQuery(reinterpret_cast<const FcChar8 *>(path.c_str()), 0, nullptr, nullptr);
+            CC_ASSERT_NOT_NULL(pattern);
+            found = _queried.emplace(path, pattern).first;
+        }
+        return FcPatternDuplicate(found->second);
+    }
+
+private:
+    std::unordered_map<ccstd::string, FcPattern *> _queried;
+};
+
+FontFileQueries fontFileQueries;
 } // namespace
 
 namespace cc {
@@ -599,7 +631,7 @@ void CanvasRenderingContext2DDelegate::updateFont(const ccstd::string &fontName,
     const auto registered = registeredFonts.find(fontName);
     const bool customFont = registered != registeredFonts.end();
     FcPattern *requested = customFont
-                               ? FcFreeTypeQuery(reinterpret_cast<const FcChar8 *>(registered->second.c_str()), 0, nullptr, nullptr)
+                               ? fontFileQueries.query(registered->second)
                                : FcPatternCreate();
     CC_ASSERT_NOT_NULL(requested);
     if (customFont) {
