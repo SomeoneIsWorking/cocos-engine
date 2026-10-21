@@ -51,6 +51,16 @@ static bool js_cocos2dx_dragonbones_Slot_get_globalTransformMatrix(se::State &s)
 }
 SE_BIND_PROP_GET(js_cocos2dx_dragonbones_Slot_get_globalTransformMatrix)
 
+// The slot's own colour, which a script tints by its multipliers and `_colorDirty`, as on the web.
+static bool js_cocos2dx_dragonbones_Slot_get_colorTransform(se::State &s) {
+    dragonBones::Slot *cobj = (dragonBones::Slot *)s.nativeThisObject();
+    SE_PRECONDITION2(cobj, false, "Invalid Native Object");
+    bool ok = native_ptr_to_seval<dragonBones::ColorTransform>(&cobj->_colorTransform, &s.rval());
+    SE_PRECONDITION2(ok, false, "Error processing arguments");
+    return true;
+}
+SE_BIND_PROP_GET(js_cocos2dx_dragonbones_Slot_get_colorTransform)
+
 // add by fins
 static bool js_cocos2dx_dragonbones_Animation_get_animations(se::State &s) {
     dragonBones::Animation *cobj = (dragonBones::Animation *)s.nativeThisObject();
@@ -427,6 +437,7 @@ SE_BIND_FUNC(js_cocos2dx_dragonbones_BaseFactory_parseTextureAtlasData)
 bool register_all_dragonbones_manual(se::Object *obj) {
     // add by fins
     __jsb_dragonBones_Slot_proto->defineProperty("globalTransformMatrix", _SE(js_cocos2dx_dragonbones_Slot_get_globalTransformMatrix), nullptr);
+    __jsb_dragonBones_Slot_proto->defineProperty("_colorTransform", _SE(js_cocos2dx_dragonbones_Slot_get_colorTransform), nullptr);
     // add by fins
     __jsb_dragonBones_Animation_proto->defineProperty("animations", _SE(js_cocos2dx_dragonbones_Animation_get_animations), nullptr);
 
