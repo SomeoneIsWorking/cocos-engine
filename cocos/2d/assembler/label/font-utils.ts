@@ -143,7 +143,8 @@ class LetterTexture {
             const fontScale = this.labelInfo.fontScale;
             this.context.font = this.labelInfo.fontDesc;
             const width = safeMeasureText(this.context, this.char, this.labelInfo.fontDesc);
-            const blank = this.labelInfo.margin * 2 + bleed;
+            // The stroke is drawn fontScale times wider, so its box is too.
+            const blank = this.labelInfo.margin * 2 * fontScale + bleed;
             this.width = parseFloat(width.toFixed(2)) * fontScale + blank;
             this.height = (1 + BASELINE_RATIO) * this.labelInfo.fontSize * fontScale + blank;
             this.offsetY = -(this.labelInfo.fontSize * BASELINE_RATIO) * fontScale / 2;

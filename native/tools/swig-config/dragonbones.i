@@ -53,6 +53,7 @@
 %ignore dragonBones::Bone::Bone;
 %ignore dragonBones::Transform::Transform;
 %ignore dragonBones::Matrix::Matrix;
+%ignore dragonBones::ColorTransform::operator=;
 %ignore dragonBones::TransformObject::TransformObject;
 %ignore dragonBones::ArmatureData::ArmatureData;
 %ignore dragonBones::BoneData::BoneData;
@@ -114,7 +115,6 @@
 %ignore dragonBones::Slot::_displayData;
 %ignore dragonBones::Slot::_deformVertices;
 %ignore dragonBones::Slot::_cachedFrameIndices;
-%ignore dragonBones::Slot::_colorDirty;
 %ignore dragonBones::Slot::_blendMode;
 %ignore dragonBones::Slot::_pivotX;
 %ignore dragonBones::Slot::_pivotY;
@@ -409,6 +409,7 @@
 %include "editor-support/dragonbones/geom/Rectangle.h"
 %include "editor-support/dragonbones/geom/Transform.h"
 %include "editor-support/dragonbones/geom/Matrix.h"
+%include "editor-support/dragonbones/geom/ColorTransform.h"
 
 %include "editor-support/dragonbones/core/BaseObject.h"
 %include "editor-support/dragonbones/event/EventObject.h"
