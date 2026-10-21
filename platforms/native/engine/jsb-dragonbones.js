@@ -543,6 +543,8 @@ const cacheManager = require('./jsb-cache-manager');
         if (_onDisable) {
             _onDisable.call(this);
         }
+        // A display rebuilt while disabled stays off the clock, so its destroy cannot leave it there.
+        this.shouldSchedule = false;
         if (this._armature && !this.isAnimationCached()) {
             this._factory.remove(this._armature);
         }
